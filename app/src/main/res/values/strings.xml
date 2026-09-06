@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Personal Terminal</string>
+    <string name="widget_label">Personal Terminal · today</string>
+    <string name="widget_description">Check off today\'s habits straight from your home screen.</string>
+    <string name="notification_channel_timer">Focus timer</string>
+    <string name="notification_channel_timer_desc">Shows the running Pomodoro session</string>
+    <string name="notification_channel_backup">Drive backup</string>
+    <string name="notification_channel_backup_desc">Status of automatic Google Drive backups</string>
+    <string name="widget_loading">user@android $ loading…</string>
+    <string name="widget_preview_prompt">user@android $ today</string>
+    <string name="widget_preview_rows">[✓] meditate\n[ ] read 20 pages\n[ ] water 5/8</string>
+    <string name="widget_preview_bar">████░░░░░░ 33%</string>
+</resources>

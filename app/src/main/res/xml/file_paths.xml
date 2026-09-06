@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <files-path name="watch_photos" path="watch_photos/" />
+    <cache-path name="camera_cache" path="camera/" />
+    <files-path name="backups" path="backups/" />
+</paths>

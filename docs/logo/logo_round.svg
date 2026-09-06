@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Personal Terminal – logo
+  Concept: a terminal prompt chevron (>) whose tip sits on the 12-o'clock index of a minimalist
+  watch face, while the second stroke doubles as a check-mark ✓ (habit done). The blinking block
+  cursor ▌ is the watch crown. Monochrome friendly; accent = Dracula green on Dracula background.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2b2d3a"/>
+      <stop offset="1" stop-color="#1c1d26"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#50fa7b"/>
+      <stop offset="1" stop-color="#8be9fd"/>
+    </linearGradient>
+  </defs>
+
+  <!-- rounded square background -->
+  <circle cx="256" cy="256" r="256" fill="url(#bg)"/>
+
+  <!-- watch face ring (thin, technical) -->
+  <circle cx="256" cy="256" r="150" fill="none" stroke="#6272a4" stroke-width="10" opacity="0.55"/>
+  <!-- hour indices: 12, 3, 6, 9 -->
+  <g stroke="#6272a4" stroke-width="10" stroke-linecap="round" opacity="0.7">
+    <line x1="256" y1="94"  x2="256" y2="120"/>
+    <line x1="418" y1="256" x2="392" y2="256"/>
+    <line x1="256" y1="418" x2="256" y2="392"/>
+    <line x1="94"  y1="256" x2="120" y2="256"/>
+  </g>
+
+  <!-- prompt chevron ">" that also reads as a check-mark / watch hands -->
+  <path d="M176 172 L268 256 L176 340"
+        fill="none" stroke="url(#accent)" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- block cursor ▌ (also the watch crown at 3 o'clock) -->
+  <rect x="300" y="228" width="60" height="56" rx="8" fill="#f8f8f2"/>
+</svg>
