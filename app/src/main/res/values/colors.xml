@@ -6,4 +6,7 @@
     <color name="widget_fg">#F8F8F2</color>
     <color name="widget_accent">#50FA7B</color>
     <color name="widget_muted">#6272A4</color>
+    <!-- Focus timer notification accents (Dracula orange / cyan) -->
+    <color name="timer_focus">#FFB86C</color>
+    <color name="timer_break">#8BE9FD</color>
 </resources>

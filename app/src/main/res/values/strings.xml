@@ -4,7 +4,9 @@
     <string name="widget_label">Personal Terminal · today</string>
     <string name="widget_description">Check off today\'s habits straight from your home screen.</string>
     <string name="notification_channel_timer">Focus timer</string>
-    <string name="notification_channel_timer_desc">Shows the running Pomodoro session</string>
+    <string name="notification_channel_timer_desc">Live countdown of the running Pomodoro session</string>
+    <string name="notification_channel_timer_alerts">Timer alerts</string>
+    <string name="notification_channel_timer_alerts_desc">Sound when a focus or break phase finishes</string>
     <string name="notification_channel_backup">Drive backup</string>
     <string name="notification_channel_backup_desc">Status of automatic Google Drive backups</string>
     <string name="widget_loading">user@android $ loading…</string>

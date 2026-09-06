@@ -63,10 +63,21 @@ class PersonalTerminalApp : Application() {
 
     private fun createChannels() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.deleteNotificationChannel("timer") // pre-0.2 channel had IMPORTANCE_LOW (no Live Update eligibility)
         nm.createNotificationChannel(
-            NotificationChannel(CHANNEL_TIMER, getString(R.string.notification_channel_timer), NotificationManager.IMPORTANCE_LOW).apply {
+            // DEFAULT (not LOW) so the countdown is eligible for Live Update promotion and never
+            // gets tucked into the "silent" section; the notification itself is posted silent.
+            NotificationChannel(CHANNEL_TIMER, getString(R.string.notification_channel_timer), NotificationManager.IMPORTANCE_DEFAULT).apply {
                 description = getString(R.string.notification_channel_timer_desc)
                 setShowBadge(false)
+                setSound(null, null)
+                enableVibration(false)
+            },
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_TIMER_ALERTS, getString(R.string.notification_channel_timer_alerts), NotificationManager.IMPORTANCE_HIGH).apply {
+                description = getString(R.string.notification_channel_timer_alerts_desc)
+                enableVibration(true)
             },
         )
         nm.createNotificationChannel(
@@ -77,7 +88,8 @@ class PersonalTerminalApp : Application() {
     }
 
     companion object {
-        const val CHANNEL_TIMER = "timer"
+        const val CHANNEL_TIMER = "timer_v2"
+        const val CHANNEL_TIMER_ALERTS = "timer_alerts"
         const val CHANNEL_BACKUP = "backup"
 
         fun get(context: Context): PersonalTerminalApp = context.applicationContext as PersonalTerminalApp

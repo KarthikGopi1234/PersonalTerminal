@@ -10,9 +10,18 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Android 16 Live Updates: lets the running focus timer be promoted to the status-bar chip / lock screen -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!-- Lets the timer screen check whether the per-app "Live Updates" settings page exists (Android 16+) -->
+    <queries>
+        <intent>
+            <action android:name="android.settings.APP_NOTIFICATION_PROMOTION_SETTINGS" />
+        </intent>
+    </queries>
 
     <application
         android:name=".PersonalTerminalApp"

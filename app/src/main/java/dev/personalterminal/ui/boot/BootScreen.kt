@@ -67,7 +67,7 @@ fun BootScreen(app: PersonalTerminalApp, onDone: () -> Unit) {
             .verticalScroll(rememberScrollState())
             .padding(20.dp),
     ) {
-        Text("Personal Terminal v0.1", color = p.green, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("Personal Terminal v${dev.personalterminal.BuildConfig.VERSION_NAME}", color = p.green, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text("booting…", color = p.fgDim, style = MaterialTheme.typography.bodySmall)
         Spacer(Modifier.height(16.dp))
         bootLines.take(shown).forEach { line ->

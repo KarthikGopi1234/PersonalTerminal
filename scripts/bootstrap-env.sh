@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs a headless Android build toolchain (JDK 17 + SDK platform 35 / build-tools 35) on Debian/Ubuntu.
+# Installs a headless Android build toolchain (JDK 17 + SDK platform 36 / build-tools 35) on Debian/Ubuntu.
 # Idempotent: re-running only downloads what is missing. Writes local.properties with sdk.dir.
 #
 #   scripts/bootstrap-env.sh            # install to /opt (needs sudo) or $HOME/android-toolchain
@@ -39,7 +39,7 @@ if [[ ! -x "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" ]]; then
 fi
 SDKMANAGER="$SDK_DIR/cmdline-tools/latest/bin/sdkmanager"
 yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-"$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0" >/dev/null
+"$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;35.0.0" >/dev/null
 
 cd "$(dirname "$0")/.."
 grep -q '^sdk.dir=' local.properties 2>/dev/null || echo "sdk.dir=$SDK_DIR" >> local.properties

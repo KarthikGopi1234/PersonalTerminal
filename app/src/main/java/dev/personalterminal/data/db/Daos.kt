@@ -219,6 +219,9 @@ interface WearLogDao {
     @Query("SELECT * FROM wear_logs WHERE id = :id")
     suspend fun getById(id: Long): WearLog?
 
+    @Query("SELECT * FROM wear_logs WHERE watchId = :watchId AND day = :day ORDER BY createdAt DESC")
+    suspend fun getForWatchAndDay(watchId: Long, day: Long): List<WearLog>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(log: WearLog): Long
 

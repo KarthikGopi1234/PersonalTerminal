@@ -1,6 +1,7 @@
 package dev.personalterminal.timer
 
 import android.app.Notification
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
@@ -12,7 +13,9 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
 import dev.personalterminal.MainActivity
 import dev.personalterminal.PersonalTerminalApp
 import dev.personalterminal.R
@@ -41,9 +44,18 @@ data class TimerState(
     val habitName: String = "",
     /** Seconds of *focus* time accrued in the current focus phase (for partial credit on stop). */
     val focusedSeconds: Int = 0,
+    /** Wall-clock time (epoch ms) at which the current phase ends. Only meaningful while [running]. */
+    val endsAtMs: Long = 0L,
 ) {
     val fraction: Float get() = if (totalSeconds == 0) 0f else 1f - remainingSeconds.toFloat() / totalSeconds
-    val clock: String get() = "%02d:%02d".format(remainingSeconds / 60, remainingSeconds % 60)
+    val clock: String get() = formatClock(remainingSeconds)
+
+    companion object {
+        fun formatClock(seconds: Int): String {
+            val h = seconds / 3600; val m = seconds / 60 % 60; val s = seconds % 60
+            return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%02d:%02d".format(m, s)
+        }
+    }
 }
 
 /**
@@ -90,27 +102,30 @@ class PomodoroService : Service() {
         _state.value = _state.value.copy(
             phase = phase, running = true, totalSeconds = secs, remainingSeconds = secs,
             habitId = habitId, habitName = habitName, focusedSeconds = 0,
+            endsAtMs = System.currentTimeMillis() + secs * 1000L,
         )
         goForeground()
         startTicker()
     }
 
+    /**
+     * Ticks once per wall-clock second. Remaining time is always derived from [TimerState.endsAtMs]
+     * rather than accumulated, so it cannot drift while the device dozes and it stays in sync with
+     * the chronometer / status-chip countdown the system renders from the same end time.
+     */
     private fun startTicker() {
         ticker?.cancel()
         ticker = scope.launch {
-            var last = System.currentTimeMillis()
             while (isActive) {
-                delay(1000)
                 val now = System.currentTimeMillis()
-                val elapsed = ((now - last) / 1000).toInt().coerceAtLeast(1)
-                last = now
+                delay(1000 - now % 1000) // align to the next second boundary
                 val s = _state.value
                 if (!s.running) continue
-                val remaining = (s.remainingSeconds - elapsed).coerceAtLeast(0)
-                val focused = if (s.phase == Phase.FOCUS) s.focusedSeconds + elapsed else s.focusedSeconds
+                val remaining = ((s.endsAtMs - System.currentTimeMillis() + 999) / 1000).toInt().coerceIn(0, s.totalSeconds)
+                if (remaining == s.remainingSeconds) continue
+                val focused = if (s.phase == Phase.FOCUS) s.totalSeconds - remaining else s.focusedSeconds
                 _state.value = s.copy(remainingSeconds = remaining, focusedSeconds = focused)
-                if (remaining % 15 == 0) updateNotification()
-                if (remaining == 0) onPhaseFinished()
+                if (remaining == 0) onPhaseFinished() else updateNotification()
             }
         }
     }
@@ -118,6 +133,7 @@ class PomodoroService : Service() {
     private fun onPhaseFinished() {
         val s = _state.value
         buzz()
+        postPhaseDoneAlert(s)
         if (s.phase == Phase.FOCUS) {
             creditFocus(s.habitId, config.focus)
             val cycle = s.cycle + 1
@@ -134,8 +150,20 @@ class PomodoroService : Service() {
         scope.launch { app.habits.addValue(habitId, minutes) }
     }
 
-    private fun pause() { _state.value = _state.value.copy(running = false); updateNotification() }
-    private fun resume() { _state.value = _state.value.copy(running = true); updateNotification() }
+    private fun pause() {
+        val s = _state.value
+        if (!s.running) return
+        val remaining = ((s.endsAtMs - System.currentTimeMillis() + 999) / 1000).toInt().coerceIn(0, s.totalSeconds)
+        _state.value = s.copy(running = false, remainingSeconds = remaining)
+        updateNotification()
+    }
+
+    private fun resume() {
+        val s = _state.value
+        if (s.running || s.phase == Phase.IDLE) return
+        _state.value = s.copy(running = true, endsAtMs = System.currentTimeMillis() + s.remainingSeconds * 1000L)
+        updateNotification()
+    }
 
     private fun skip() {
         val s = _state.value
@@ -151,6 +179,7 @@ class PomodoroService : Service() {
         if (creditPartial && s.phase == Phase.FOCUS) creditFocus(s.habitId, s.focusedSeconds / 60)
         ticker?.cancel()
         _state.value = TimerState()
+        NotificationManagerCompat.from(this).cancel(ALERT_NOTIF_ID)
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -169,19 +198,38 @@ class PomodoroService : Service() {
     }
 
     private fun updateNotification() {
-        (getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager).notify(NOTIF_ID, buildNotification())
+        // The FGS notification is exempt from the runtime permission, but a plain notify() is not.
+        if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) return
+        runCatching { NotificationManagerCompat.from(this).notify(NOTIF_ID, buildNotification()) }
     }
 
+    /**
+     * Ongoing countdown notification, built to qualify as an Android 16 **Live Update** (promoted
+     * ongoing notification): ProgressStyle, ongoing, titled, not colorized, promotion requested.
+     * On Android 16+ that puts the timer in the status-bar chip / lock screen (and OEM surfaces
+     * such as ColorOS 16 "Live Alerts" or One UI's Now Bar); older versions get a regular ongoing
+     * notification whose header chronometer counts down on its own between updates.
+     */
     private fun buildNotification(): Notification {
         val s = _state.value
-        val title = when (s.phase) {
-            Phase.FOCUS -> "focus ▶ ${s.clock}"
-            Phase.BREAK -> "break ☕ ${s.clock}"
-            Phase.LONG_BREAK -> "long break ☕ ${s.clock}"
+        val phaseLabel = when (s.phase) {
+            Phase.FOCUS -> "focus"
+            Phase.BREAK -> "break"
+            Phase.LONG_BREAK -> "long break"
             Phase.IDLE -> "idle"
         }
+        val glyph = when {
+            !s.running -> "‖"
+            s.phase == Phase.FOCUS -> "▶"
+            else -> "☕"
+        }
+        val title = "$phaseLabel $glyph ${s.clock}" + if (!s.running) " (paused)" else ""
         val bar = asciiBar(s.fraction, 16)
-        val text = if (s.habitName.isNotBlank()) "$bar  ${s.habitName}" else bar
+        val text = buildString {
+            append(bar)
+            if (s.habitName.isNotBlank()) append("  ").append(s.habitName)
+            if (s.cycle > 0) append("  🍅×").append(s.cycle)
+        }
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java).apply { putExtra(MainActivity.EXTRA_ROUTE, "timer") },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
@@ -191,19 +239,71 @@ class PomodoroService : Service() {
             PendingIntent.getService(this, action.hashCode(), Intent(this, PomodoroService::class.java).setAction(action),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE),
         ).build()
-        return NotificationCompat.Builder(this, PersonalTerminalApp.CHANNEL_TIMER)
+        val accent = ContextCompat.getColor(this, if (s.phase == Phase.FOCUS) R.color.timer_focus else R.color.timer_break)
+        val elapsed = (s.totalSeconds - s.remainingSeconds).coerceIn(0, s.totalSeconds)
+        val style = NotificationCompat.ProgressStyle()
+            .setProgressSegments(listOf(NotificationCompat.ProgressStyle.Segment(s.totalSeconds.coerceAtLeast(1)).setColor(accent)))
+            .setProgress(elapsed)
+            .setStyledByProgress(true)
+
+        val b = NotificationCompat.Builder(this, PersonalTerminalApp.CHANNEL_TIMER)
             .setSmallIcon(R.drawable.ic_notification)
+            .setColor(accent)
             .setContentTitle(title)
             .setContentText(text)
+            .setStyle(style)
             .setOngoing(true)
+            .setSilent(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(open)
-            .setProgress(100, (s.fraction * 100).toInt(), false)
+            .setCategory(NotificationCompat.CATEGORY_STOPWATCH)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            // Android 16 Live Update opt-in (ignored on older versions).
+            .setRequestPromotedOngoing(true)
             .addAction(if (s.running) action(ACTION_PAUSE, "pause") else action(ACTION_RESUME, "resume"))
             .addAction(action(ACTION_SKIP, "skip"))
             .addAction(action(ACTION_STOP, "stop"))
+        if (s.running) {
+            // Header chronometer counts down to the phase end without further updates from us, and
+            // the Live Update status chip shows the same ticking countdown (chip text is only used
+            // when no chronometer is running, so leave shortCriticalText unset here).
+            b.setWhen(s.endsAtMs).setShowWhen(true).setUsesChronometer(true).setChronometerCountDown(true)
+        } else {
+            b.setShowWhen(false).setUsesChronometer(false).setShortCriticalText("paused")
+        }
+        return b.build()
+    }
+
+    /** One-shot, audible "phase finished" alert on the high-importance channel (heads-up + lock screen). */
+    private fun postPhaseDoneAlert(finished: TimerState) {
+        if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) return
+        val next = when {
+            finished.phase != Phase.FOCUS -> "focus"
+            (finished.cycle + 1) % 4 == 0 -> "long break"
+            else -> "break"
+        }
+        val title = if (finished.phase == Phase.FOCUS) "focus complete ✓" else "break over"
+        val text = if (finished.phase == Phase.FOCUS) {
+            "+${config.focus} min" + (if (finished.habitName.isNotBlank()) " → ${finished.habitName}" else "") + " · $next starts now"
+        } else "back to work · $next starts now"
+        val open = PendingIntent.getActivity(
+            this, 1, Intent(this, MainActivity::class.java).apply { putExtra(MainActivity.EXTRA_ROUTE, "timer") },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val n = NotificationCompat.Builder(this, PersonalTerminalApp.CHANNEL_TIMER_ALERTS)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .setTimeoutAfter(2 * 60_000L)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_LIGHTS)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .build()
+        runCatching { NotificationManagerCompat.from(this).notify(ALERT_NOTIF_ID, n) }
     }
 
     private fun buzz() {
@@ -220,6 +320,7 @@ class PomodoroService : Service() {
 
     companion object {
         private const val NOTIF_ID = 1001
+        private const val ALERT_NOTIF_ID = 1002
         const val ACTION_START = "dev.personalterminal.timer.START"
         const val ACTION_PAUSE = "dev.personalterminal.timer.PAUSE"
         const val ACTION_RESUME = "dev.personalterminal.timer.RESUME"
@@ -248,6 +349,25 @@ class PomodoroService : Service() {
         fun asciiBar(fraction: Float, width: Int): String {
             val filled = (fraction.coerceIn(0f, 1f) * width).toInt()
             return "█".repeat(filled) + "░".repeat(width - filled)
+        }
+
+        /**
+         * Whether the OS will *promote* our timer notification (Android 16 Live Updates). `true` on
+         * older versions, where the question does not arise. False means the user switched Live
+         * Updates off for this app – see [liveUpdateSettingsIntent].
+         */
+        fun canPostLiveUpdates(context: Context): Boolean {
+            if (Build.VERSION.SDK_INT < 36) return true
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            return runCatching { nm.canPostPromotedNotifications() }.getOrDefault(true)
+        }
+
+        /** Deep link to the per-app "Live Updates" toggle, or null when this OS build has no such screen. */
+        fun liveUpdateSettingsIntent(context: Context): Intent? {
+            if (Build.VERSION.SDK_INT < 36) return null
+            val i = Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS)
+                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+            return i.takeIf { it.resolveActivity(context.packageManager) != null }
         }
     }
 }

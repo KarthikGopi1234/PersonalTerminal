@@ -1,7 +1,10 @@
 name: Android CI & Release
 
 # Every push to main: test → lint → build debug (smoke test only) + release APK → publish a
-# GitHub Release whose notes are the commit message (subject = title, body = notes).
+# GitHub Release named after the version number (e.g. "0.2.1") whose notes are the commit message.
+# Versioning is automatic: app.version in gradle.properties gives MAJOR.MINOR, the patch number is
+# the next free vMAJOR.MINOR.N tag and versionCode is the run number (see app/build.gradle.kts).
+# The tag is created by the release step, i.e. only after the build succeeded.
 # Only the release APK and its checksum are attached to the release; the debug build is kept
 # as a workflow artifact for 14 days in case a debugger is needed.
 # Pull requests only run the build/test part.
@@ -38,7 +41,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # full history so the commit message / tag logic works
+          fetch-depth: 0   # full history + all tags: the next patch version is derived from existing tags
+          fetch-tags: true
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -48,6 +52,8 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools platforms;android-36 build-tools;35.0.0
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -70,6 +76,20 @@ jobs:
             echo "::warning::RELEASE_KEYSTORE_BASE64 secret not set – release APK will be signed with the debug key."
           fi
 
+      - name: Resolve version
+        id: version
+        run: |
+          git fetch --tags --force --quiet
+          ./gradlew printVersion --console=plain --quiet
+          NAME=$(grep '^versionName=' app/build/version.properties | cut -d= -f2)
+          CODE=$(grep '^versionCode=' app/build/version.properties | cut -d= -f2)
+          [ "$CODE" = "${{ github.run_number }}" ] || { echo "::error::versionCode $CODE != run number"; exit 1; }
+          if git rev-parse -q --verify "refs/tags/v$NAME" >/dev/null; then echo "::error::tag v$NAME already exists"; exit 1; fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "tag=v$NAME" >> "$GITHUB_OUTPUT"
+          echo "Building version $NAME (versionCode $CODE) → tag v$NAME"
+
       - name: Unit tests
         run: ./gradlew testDebugUnitTest --console=plain --stacktrace
 
@@ -88,30 +108,34 @@ jobs:
 
       - name: Collect artifacts
         id: meta
+        env:
+          NAME: ${{ steps.version.outputs.name }}
+          CODE: ${{ steps.version.outputs.code }}
         run: |
-          VERSION=$(grep -E '^app.versionName=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')
-          BUILD=${{ github.run_number }}
-          TAG="v${VERSION}-build.${BUILD}"
           mkdir -p dist debug-dist
           REL=$(ls app/build/outputs/apk/release/*.apk | head -n1)
-          cp "$REL" "dist/personal-terminal-${VERSION}-build.${BUILD}.apk"
+          cp "$REL" "dist/personal-terminal-${NAME}.apk"
           (cd dist && sha256sum *.apk > SHA256SUMS.txt)
-          cp app/build/outputs/apk/debug/app-debug.apk "debug-dist/personal-terminal-${VERSION}-build.${BUILD}-debug.apk"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          cp app/build/outputs/apk/debug/app-debug.apk "debug-dist/personal-terminal-${NAME}-debug.apk"
+          # The APK must carry exactly the version we are about to publish.
+          AAPT=$(ls -d "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -n1)
+          BADGING=$("$AAPT" dump badging "$REL" | head -n1)
+          echo "$BADGING"
+          echo "$BADGING" | grep -q "versionCode='${CODE}'" || { echo "::error::versionCode in APK != ${CODE}"; exit 1; }
+          echo "$BADGING" | grep -q "versionName='${NAME}'" || { echo "::error::versionName in APK != ${NAME}"; exit 1; }
           ls -la dist debug-dist
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: personal-terminal-${{ steps.meta.outputs.tag }}
+          name: personal-terminal-${{ steps.version.outputs.name }}
           path: dist/*
           if-no-files-found: error
 
       - name: Upload debug APK (workflow artifact only)
         uses: actions/upload-artifact@v4
         with:
-          name: personal-terminal-${{ steps.meta.outputs.tag }}-debug
+          name: personal-terminal-${{ steps.version.outputs.name }}-debug
           path: debug-dist/*
           retention-days: 14
           if-no-files-found: error
@@ -130,6 +154,8 @@ jobs:
         id: notes
         env:
           COMMIT_SHA: ${{ github.sha }}
+          NAME: ${{ steps.version.outputs.name }}
+          CODE: ${{ steps.version.outputs.code }}
         run: |
           SUBJECT=$(git log -1 --pretty=%s "$COMMIT_SHA")
           BODY=$(git log -1 --pretty=%b "$COMMIT_SHA")
@@ -139,25 +165,24 @@ jobs:
             if [ -n "$BODY" ]; then echo "$BODY"; else echo "_No further description provided in the commit._"; fi
             echo
             echo "---"
-            echo "**Version:** ${{ steps.meta.outputs.version }} · **Build:** #${{ github.run_number }} · **Commit:** \`${COMMIT_SHA::7}\`"
+            echo "**Version:** ${NAME} · **versionCode:** ${CODE} · **Commit:** \`${COMMIT_SHA::7}\`"
             echo "**Release signing:** ${{ steps.keystore.outputs.signed == 'true' && 'release keystore' || 'debug key (set RELEASE_KEYSTORE_* secrets for a production signature)' }}"
             echo
             echo "### Assets"
-            echo "- \`personal-terminal-${{ steps.meta.outputs.version }}-build.${{ github.run_number }}.apk\` – install this (minified R8 release build, package \`dev.personalterminal\`)"
+            echo "- \`personal-terminal-${NAME}.apk\` – install this (minified R8 release build, package \`dev.personalterminal\`)"
             echo "- \`SHA256SUMS.txt\` – checksum to verify the download"
             echo
             echo "_A debuggable build is available as a workflow artifact on the [Actions run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for 14 days._"
           } > RELEASE_NOTES.md
-          echo "title=${SUBJECT}" >> "$GITHUB_OUTPUT"
           cat RELEASE_NOTES.md
 
       - name: Publish GitHub Release
         if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.meta.outputs.tag }}
+          tag_name: ${{ steps.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: ${{ steps.notes.outputs.title }}
+          name: ${{ steps.version.outputs.name }}
           body_path: RELEASE_NOTES.md
           files: |
             dist/*.apk

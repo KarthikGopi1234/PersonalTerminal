@@ -265,7 +265,7 @@ fun SettingsScreen(app: PersonalTerminalApp, nav: NavHostController) {
 
         TerminalPanel(title = "about") {
             KeyValue("app", "Personal Terminal")
-            KeyValue("version", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            KeyValue("version", "${BuildConfig.VERSION_NAME} · build ${BuildConfig.VERSION_CODE}")
             KeyValue("font", "JetBrains Mono (OFL)")
             Comment("inspired by Init Habits · built with Jetpack Compose")
             Spacer(Modifier.height(6.dp))

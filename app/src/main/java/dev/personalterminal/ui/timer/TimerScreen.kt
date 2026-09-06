@@ -1,8 +1,10 @@
 package dev.personalterminal.ui.timer
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings as SysSettings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -23,8 +25,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -37,6 +41,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import dev.personalterminal.PersonalTerminalApp
@@ -63,11 +70,35 @@ fun TimerScreen(app: PersonalTerminalApp, nav: NavHostController, initialHabitId
     var selectedHabit by remember { mutableLongStateOf(initialHabitId) }
     if (state.phase != Phase.IDLE) selectedHabit = state.habitId
 
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    fun ensureNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    // Notification permission gates the countdown notification (and the Live Update chip on
+    // Android 16). Ask before the first start; if denied, still start the timer – it just won't
+    // show outside the app – and explain how to fix it.
+    fun notificationsAllowed() = Build.VERSION.SDK_INT < 33 ||
+        ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    var notifGranted by remember { mutableStateOf(notificationsAllowed()) }
+    var liveUpdatesOn by remember { mutableStateOf(PomodoroService.canPostLiveUpdates(ctx)) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        // Re-check when coming back from system settings.
+        val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) { notifGranted = notificationsAllowed(); liveUpdatesOn = PomodoroService.canPostLiveUpdates(ctx) } }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+    fun startSession() {
+        val h = timerHabits.firstOrNull { it.id == selectedHabit }
+        PomodoroService.start(ctx, settings.pomodoroFocusMin, settings.pomodoroBreakMin, settings.pomodoroLongBreakMin, h?.id ?: 0L, h?.name ?: "")
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        notifGranted = granted
+        startSession()
+    }
+    fun startWithPermission() {
+        if (notificationsAllowed()) startSession()
+        else permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+    fun openNotificationSettings() {
+        val i = Intent(SysSettings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(SysSettings.EXTRA_APP_PACKAGE, ctx.packageName)
+        runCatching { ctx.startActivity(i) }
     }
 
     val phaseColor = when (state.phase) { Phase.FOCUS -> p.orange; Phase.BREAK, Phase.LONG_BREAK -> p.cyan; Phase.IDLE -> p.green }
@@ -104,11 +135,7 @@ fun TimerScreen(app: PersonalTerminalApp, nav: NavHostController, initialHabitId
         // ---- controls ----
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             when {
-                state.phase == Phase.IDLE -> TermButton("▶ start focus", filled = true, modifier = Modifier.weight(1f), onClick = {
-                    ensureNotificationPermission()
-                    val h = timerHabits.firstOrNull { it.id == selectedHabit }
-                    PomodoroService.start(ctx, settings.pomodoroFocusMin, settings.pomodoroBreakMin, settings.pomodoroLongBreakMin, h?.id ?: 0L, h?.name ?: "")
-                })
+                state.phase == Phase.IDLE -> TermButton("▶ start focus", filled = true, modifier = Modifier.weight(1f), onClick = { startWithPermission() })
                 state.running -> TermButton("‖ pause", modifier = Modifier.weight(1f), color = p.yellow, onClick = { PomodoroService.send(ctx, PomodoroService.ACTION_PAUSE) })
                 else -> TermButton("▶ resume", modifier = Modifier.weight(1f), filled = true, onClick = { PomodoroService.send(ctx, PomodoroService.ACTION_RESUME) })
             }
@@ -116,6 +143,29 @@ fun TimerScreen(app: PersonalTerminalApp, nav: NavHostController, initialHabitId
                 TermButton("skip »", color = p.cyan, onClick = { PomodoroService.send(ctx, PomodoroService.ACTION_SKIP) })
                 TermButton("■ stop", color = p.red, onClick = { PomodoroService.send(ctx, PomodoroService.ACTION_STOP) })
             }
+        }
+
+        // ---- notification / live update status ----
+        if (!notifGranted) {
+            TerminalPanel(title = "notifications off", titleColor = p.red, borderColor = p.red.copy(alpha = 0.5f)) {
+                Comment("the countdown only shows inside the app until notifications are allowed")
+                Spacer(Modifier.height(6.dp))
+                TermButton("open notification settings", color = p.red, onClick = { openNotificationSettings() })
+            }
+        } else if (!liveUpdatesOn) {
+            TerminalPanel(title = "live updates off", titleColor = p.yellow, borderColor = p.yellow.copy(alpha = 0.5f)) {
+                Comment("android 16 can pin the countdown to the status bar / lock screen (live update). it is disabled for this app")
+                Spacer(Modifier.height(6.dp))
+                TermButton("enable live updates", color = p.yellow, onClick = {
+                    val i = PomodoroService.liveUpdateSettingsIntent(ctx)
+                    if (i != null) runCatching { ctx.startActivity(i) } else openNotificationSettings()
+                })
+            }
+        } else if (state.phase != Phase.IDLE) {
+            Comment(
+                if (Build.VERSION.SDK_INT >= 36) "# countdown is live in the status bar & lock screen — this screen can be closed"
+                else "# countdown continues in the notification shade — this screen can be closed",
+            )
         }
 
         // ---- habit binding ----

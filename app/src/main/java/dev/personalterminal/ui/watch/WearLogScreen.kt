@@ -1,8 +1,5 @@
 package dev.personalterminal.ui.watch
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,7 +23,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,7 +32,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -52,9 +47,7 @@ import dev.personalterminal.ui.components.TermTextField
 import dev.personalterminal.ui.components.TerminalPanel
 import dev.personalterminal.ui.navigation.Routes
 import dev.personalterminal.ui.theme.Term
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -62,28 +55,14 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun WearLogScreen(app: PersonalTerminalApp, nav: NavHostController, epochDay: Long?) {
     val p = Term.palette
-    val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var date by remember { mutableStateOf(epochDay?.let { LocalDate.ofEpochDay(it) } ?: LocalDate.now()) }
     val watches by remember { app.watches.observeWatches() }.collectAsStateWithLifecycle(initialValue = emptyList())
     val existing by remember(date) { app.watches.observeWearForDay(date) }.collectAsStateWithLifecycle(initialValue = emptyList())
     var selected by remember { mutableLongStateOf(0L) }
     var note by remember { mutableStateOf("") }
-    var photoPath by remember { mutableStateOf<String?>(null) }
-    var photoVersion by remember { mutableIntStateOf(0) }
-    var showCamera by remember { mutableStateOf(false) }
-
-    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) scope.launch {
-            val name = app.watches.newPhotoName()
-            runCatching { withContext(Dispatchers.IO) { importPhoto(ctx, uri, app.watches.photoFile(name)) } }.onSuccess { photoPath = name; photoVersion++ }
-        }
-    }
-    if (showCamera) {
-        val name = remember { app.watches.newPhotoName() }
-        CameraCapture(outputFile = app.watches.photoFile(name), onCaptured = { photoPath = name; photoVersion++; showCamera = false }, onCancel = { showCamera = false })
-        return
-    }
+    val photo = rememberPhotoPickerState(initialPath = null)
+    if (photoPickerCamera(app, photo)) return
 
     Column(Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         PromptLine("wear log", trailing = date.format(DateTimeFormatter.ofPattern("EEE dd MMM")))
@@ -131,24 +110,14 @@ fun WearLogScreen(app: PersonalTerminalApp, nav: NavHostController, epochDay: Lo
             }
         }
 
-        Text("wrist shot:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Box(Modifier.size(84.dp).background(p.bgHighlight, RoundedCornerShape(8.dp)).clip(RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
-                if (photoPath != null) AsyncImage(model = "${app.watches.photoFile(photoPath!!).absolutePath}?v=$photoVersion", contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                else Text("📷", style = MaterialTheme.typography.headlineSmall)
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                TermButton("● camera", color = p.cyan, onClick = { showCamera = true })
-                TermButton("gallery", color = p.fgDim, onClick = { pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
-            }
-            if (photoPath != null) TermButton("x", color = p.red, onClick = { photoPath = null })
-        }
+        Text("wrist shot (optional):", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+        PhotoPickerRow(app, photo, thumbSize = 84.dp)
         TermTextField(value = note, onValueChange = { note = it }, label = "note", placeholder = "strap, occasion, mood…", imeAction = ImeAction.Done)
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TermButton("log it", filled = true, color = p.cyan, enabled = selected != 0L, modifier = Modifier.weight(1f), onClick = {
                 scope.launch {
-                    app.watches.logWear(selected, date, photoPath, note.trim())
+                    app.watches.logWear(selected, date, photo.photoPath, note.trim())
                     nav.popBackStack()
                 }
             })

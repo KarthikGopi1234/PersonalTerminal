@@ -46,6 +46,28 @@ class WatchRepository(private val context: Context, private val db: AppDatabase)
 
     suspend fun updateWear(log: WearLog) = wearDao.update(log)
 
+    /**
+     * Attach (or replace) the wrist shot of an existing wear log. The previous photo file, if any,
+     * is deleted so the photo store never accumulates orphans.
+     */
+    suspend fun setWearPhoto(log: WearLog, photoPath: String?) = withContext(Dispatchers.IO) {
+        if (log.photoPath != null && log.photoPath != photoPath) deletePhoto(log.photoPath)
+        wearDao.update(log.copy(photoPath = photoPath))
+    }
+
+    /**
+     * "Add a wrist shot for this watch on [date]": reuses today's existing log for the watch when
+     * there is one (so a second shot replaces the first instead of creating a duplicate wear day),
+     * otherwise logs a new wear with the photo. Returns the affected log id.
+     */
+    suspend fun addWristShot(watchId: Long, date: LocalDate, photoPath: String, note: String = ""): Long {
+        val existing = wearDao.getForWatchAndDay(watchId, date.toEpochDay()).firstOrNull()
+        return if (existing != null) {
+            setWearPhoto(existing.copy(note = existing.note.ifBlank { note }), photoPath)
+            existing.id
+        } else logWear(watchId, date, photoPath, note)
+    }
+
     suspend fun deleteWear(log: WearLog) = withContext(Dispatchers.IO) {
         log.photoPath?.let { deletePhoto(it) }
         wearDao.delete(log)

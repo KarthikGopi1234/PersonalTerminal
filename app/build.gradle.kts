@@ -17,10 +17,32 @@ val googleWebClientId: String = (localProps.getProperty("GOOGLE_WEB_CLIENT_ID")
     ?: System.getenv("GOOGLE_WEB_CLIENT_ID")
     ?: "")
 
-// Versioning: marketing version lives in gradle.properties; versionCode = GitHub Actions run number
-// so every CI build is installable as an upgrade over the previous one. Local builds use 1.
-val baseVersionName: String = providers.gradleProperty("app.versionName").getOrElse("0.1.0")
+// ---------------------------------------------------------------------------------------------
+// Versioning – fully automatic, nothing to edit for a normal release.
+//   app.version  (gradle.properties) = MAJOR.MINOR, bumped by hand only for feature milestones.
+//   PATCH        = highest existing git tag `vMAJOR.MINOR.N` + 1 (0 when there is none). The release
+//                  workflow creates that tag only after a *successful* build, so the version advances
+//                  exactly once per published build; failed runs leave no gaps.
+//   versionName  = MAJOR.MINOR.PATCH                e.g. 0.2.3   (local builds: 0.2.3-local)
+//   versionCode  = GitHub Actions run number – strictly increasing, so every build installs as an
+//                  upgrade over the previous one; 1 for local builds.
+// CI reads the resolved values back from `printVersion` (app/build/version.properties) so the tag,
+// release title, asset names and the APK can never disagree.
+// ---------------------------------------------------------------------------------------------
+val versionBase: String = providers.gradleProperty("app.version").getOrElse("0.1")
+val existingVersionTags: String = runCatching {
+    providers.exec {
+        commandLine("git", "tag", "--list", "v$versionBase.*")
+        isIgnoreExitValue = true
+    }.standardOutput.asText.get()
+}.getOrDefault("")
+val versionTagPattern = Regex("""^v${Regex.escape(versionBase)}\.(\d+)$""")
+val nextPatch: Int = existingVersionTags.lines()
+    .mapNotNull { versionTagPattern.matchEntire(it.trim())?.groupValues?.get(1)?.toIntOrNull() }
+    .maxOrNull()?.plus(1) ?: 0
 val ciBuildNumber: Int? = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+val appVersionName: String = "$versionBase.$nextPatch" + (if (ciBuildNumber == null) "-local" else "")
+val appVersionCode: Int = ciBuildNumber ?: 1
 
 // Release signing: provided through env vars / local.properties (CI decodes the keystore from secrets).
 fun secret(name: String): String? = localProps.getProperty(name) ?: System.getenv(name)
@@ -29,14 +51,14 @@ val hasReleaseKey: Boolean = !releaseStoreFile.isNullOrBlank() && file(releaseSt
 
 android {
     namespace = "dev.personalterminal"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "dev.personalterminal"
         minSdk = 26
         targetSdk = 35
-        versionCode = ciBuildNumber ?: 1
-        versionName = baseVersionName
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
@@ -104,6 +126,20 @@ android {
 ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
     arg("room.incremental", "true")
+}
+
+/** Writes the resolved version to app/build/version.properties (consumed by the release workflow). */
+tasks.register("printVersion") {
+    val name = appVersionName
+    val code = appVersionCode
+    val out = layout.buildDirectory.file("version.properties")
+    inputs.property("versionName", name)
+    inputs.property("versionCode", code)
+    outputs.file(out)
+    doLast {
+        out.get().asFile.apply { parentFile.mkdirs(); writeText("versionName=$name\nversionCode=$code\n") }
+        println("versionName=$name versionCode=$code")
+    }
 }
 
 dependencies {

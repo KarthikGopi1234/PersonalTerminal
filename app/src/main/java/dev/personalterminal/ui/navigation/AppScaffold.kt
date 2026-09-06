@@ -139,16 +139,38 @@ private fun StatusLine(nav: NavHostController, current: Tab?, settings: Settings
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier
                         .then(if (selected) Modifier.background(p.bgHighlight) else Modifier)
-                        .clickable {
-                            nav.navigate(tab.route) {
-                                popUpTo(nav.graph.findStartDestination().id) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        }
+                        .clickable { nav.switchTab(tab) }
                         .padding(horizontal = 4.dp, vertical = 4.dp),
                 )
             }
         }
+    }
+}
+
+/**
+ * Bottom-bar tab switch.
+ *
+ * Deliberately *not* the textbook `popUpTo(start) { saveState = true } + restoreState = true`
+ * recipe. In this app the start destination (today) is itself a tab, and with that recipe the
+ * NavController maps "state saved while popping up to today" onto the today destination. As soon
+ * as any screen had been pushed on top of today before a tab switch (habit detail, ⛨ → profile,
+ * profile → settings …), tapping `0:today` *restores* that popped screen instead of showing
+ * today – every single time. That is the "can't get back to today" bug.
+ *
+ * So: a tab tap always unwinds to the start destination (dropping detail/edit screens, which is
+ * what a tab bar is expected to do) and, for any tab other than today, re-launches the tab root
+ * single-top on top of it. Tapping the already-selected tab acts as "back to the tab root".
+ */
+fun NavHostController.switchTab(tab: Tab) {
+    val startId = graph.findStartDestination().id
+    if (tab == Tab.TODAY) {
+        if (currentDestination?.id == startId) return
+        if (!popBackStack(startId, inclusive = false)) navigate(Routes.TODAY) { launchSingleTop = true }
+        return
+    }
+    navigate(tab.route) {
+        popUpTo(startId) { inclusive = false; saveState = false }
+        launchSingleTop = true
+        restoreState = false
     }
 }
