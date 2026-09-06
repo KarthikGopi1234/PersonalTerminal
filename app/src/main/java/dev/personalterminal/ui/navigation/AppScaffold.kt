@@ -117,7 +117,7 @@ fun AppScaffold(app: PersonalTerminalApp, settings: Settings, startRoute: String
 
 /** tmux-like status bar: `[0:today] 1:habits 2:timer 3:watch 4:profile        lvl 3 ` */
 @Composable
-private fun StatusLine(nav: NavHostController, current: Tab?, settings: Settings) {
+internal fun StatusLine(nav: NavHostController, current: Tab?, settings: Settings) {
     val p = Term.palette
     Column(Modifier.fillMaxWidth().background(p.bgAlt)) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(p.border))

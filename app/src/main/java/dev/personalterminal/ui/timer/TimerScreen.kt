@@ -163,8 +163,8 @@ fun TimerScreen(app: PersonalTerminalApp, nav: NavHostController, initialHabitId
             }
         } else if (state.phase != Phase.IDLE) {
             Comment(
-                if (Build.VERSION.SDK_INT >= 36) "# countdown is live in the status bar & lock screen — this screen can be closed"
-                else "# countdown continues in the notification shade — this screen can be closed",
+                if (Build.VERSION.SDK_INT >= 36) "countdown is live in the status bar & lock screen — this screen can be closed"
+                else "countdown continues in the notification shade — this screen can be closed",
             )
         }
 

@@ -2,6 +2,8 @@
 <h1 align="center">Personal Terminal</h1>
 <p align="center"><code>user@android $ daily</code> — a terminal-styled habit tracker for Android.</p>
 
+<p align="center"><img src="screenshots/hero.png" alt="Today, focus timer, watch collection and profile screens" width="100%"></p>
+
 ## What it does
 
 - **Habits** — checkbox, counter (`5/8 cups`) and timer modes; routines with daily / weekly / custom schedules.
@@ -12,6 +14,23 @@
 - **Watch tracker** — photograph today's watch (camera, photos or files), keep a collection, see it on the timeline.
 - **Backup** — automatic Google Drive backups, plus local export/import.
 - **Themes** — Dracula, Nord, Solarized, Gruvbox · light & dark · JetBrains Mono everywhere.
+
+## Screenshots
+
+| Today | Habits | Habit detail | Focus timer |
+|:-:|:-:|:-:|:-:|
+| <img src="screenshots/01-today.png" width="200" alt="Today"> | <img src="screenshots/02-habits.png" width="200" alt="Habits"> | <img src="screenshots/03-habit-detail.png" width="200" alt="Habit detail with heatmap"> | <img src="screenshots/04-timer.png" width="200" alt="Pomodoro timer"> |
+
+| Watches | Watch detail | Timeline | Profile |
+|:-:|:-:|:-:|:-:|
+| <img src="screenshots/05-watches.png" width="200" alt="Watch collection"> | <img src="screenshots/06-watch-detail.png" width="200" alt="Watch detail with wrist shots"> | <img src="screenshots/07-timeline.png" width="200" alt="Calendar timeline"> | <img src="screenshots/08-profile.png" width="200" alt="Profile with contribution heatmap"> |
+
+| Settings | Nord · light | Gruvbox | Solarized · light |
+|:-:|:-:|:-:|:-:|
+| <img src="screenshots/09-settings.png" width="200" alt="Settings"> | <img src="screenshots/10-theme-nord-light.png" width="200" alt="Nord light theme"> | <img src="screenshots/11-theme-gruvbox.png" width="200" alt="Gruvbox theme"> | <img src="screenshots/12-theme-solarized-light.png" width="200" alt="Solarized light theme"> |
+
+Screenshots are rendered from the real screens with demo data by `./gradlew screenshots` (Robolectric, no device needed);
+re-run it after UI changes and commit the result.
 
 ## Install
 
@@ -25,7 +44,8 @@ JDK 17 · Android SDK platform 36 · build-tools 35.0.0 (`scripts/bootstrap-env.
 ```bash
 echo "sdk.dir=$ANDROID_HOME" > local.properties
 ./gradlew assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
-./gradlew testDebugUnitTest    # streak / progression tests
+./gradlew testDebugUnitTest    # streak / progression / timer tests
+./gradlew screenshots          # regenerate screenshots/ from the UI
 ```
 
 Google Drive sync needs an OAuth *web* client id in `local.properties` as `GOOGLE_WEB_CLIENT_ID=…`
@@ -46,6 +66,10 @@ Every push to `main` runs tests → lint → build and publishes a GitHub Releas
 Bump `app.version` by hand only for feature milestones. Optional secrets: `GOOGLE_WEB_CLIENT_ID`,
 `RELEASE_KEYSTORE_BASE64` + `RELEASE_STORE_PASSWORD` / `RELEASE_KEY_ALIAS` / `RELEASE_KEY_PASSWORD`
 (without them the APK is debug-signed — still installable). The debug build is kept as a 14-day workflow artifact.
+
+## Roadmap
+
+Feature ideas, grouped and sized, live in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Stack
 

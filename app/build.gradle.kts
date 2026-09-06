@@ -1,4 +1,8 @@
+import java.awt.RenderingHints
+import java.awt.image.BufferedImage
+import java.io.File
 import java.util.Properties
+import javax.imageio.ImageIO
 
 plugins {
     alias(libs.plugins.android.application)
@@ -121,6 +125,12 @@ android {
             excludes += "/META-INF/INDEX.LIST"
         }
     }
+
+    testOptions {
+        // Robolectric renders the real Compose screens on the JVM (used by the screenshot suite).
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all { it.maxHeapSize = "1536m" }
+    }
 }
 
 ksp {
@@ -202,9 +212,65 @@ dependencies {
     implementation(libs.kotlinx.coroutines.play.services)
     implementation(libs.kotlinx.serialization.json)
 
-    // Tests
+    // Tests (Robolectric + Compose test rule power the JVM screenshot suite; not shipped in the APK)
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.junit)
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
+}
+
+/**
+ * Regenerates the README screenshots (PNG files in `screenshots/`) from the real UI:
+ *   ./gradlew screenshots
+ * Renders every screen with Robolectric on the JVM – no emulator or device needed – against a
+ * seeded demo profile, so the images are reproducible and always match the current code.
+ * The suite lives in app/src/test/java/dev/personalterminal/screenshots and is excluded from the
+ * normal unit-test run (it is documentation, not a test).
+ */
+val wantsScreenshots: Boolean = gradle.startParameter.taskNames.any { it.endsWith("screenshots") }
+tasks.register("screenshots") {
+    group = "documentation"
+    description = "Renders the app screens into screenshots/ (Robolectric, no device needed)."
+    dependsOn("testDebugUnitTest")
+    val dir = rootProject.file("screenshots")
+    doLast {
+        // Composite banner for the top of the README: four key screens side by side.
+        val parts = listOf("01-today", "04-timer", "05-watches", "08-profile").map { File(dir, "$it.png") }
+        if (parts.all { it.exists() }) {
+            val images = parts.map { ImageIO.read(it) }
+            val gap = 24
+            val fullW = images.sumOf { it.width } + gap * (images.size - 1)
+            val fullH = images.maxOf { it.height }
+            val scale = minOf(1.0, 2000.0 / fullW) // README-sized, keeps the repo lean
+            val w = (fullW * scale).toInt()
+            val h = (fullH * scale).toInt()
+            val out = BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
+            val g = out.createGraphics()
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC)
+            var x = 0.0
+            images.forEach {
+                g.drawImage(it, x.toInt(), 0, (it.width * scale).toInt(), (it.height * scale).toInt(), null)
+                x += (it.width + gap) * scale
+            }
+            g.dispose()
+            ImageIO.write(out, "png", File(dir, "hero.png"))
+            println("screenshots: wrote screenshots/hero.png (${w}x${h})")
+        }
+    }
+}
+tasks.withType<Test>().configureEach {
+    if (name != "testDebugUnitTest") return@configureEach
+    if (wantsScreenshots) {
+        val dir = rootProject.file("screenshots")
+        systemProperty("screenshots.dir", dir.absolutePath)
+        filter.includeTestsMatching("dev.personalterminal.screenshots.*")
+        outputs.upToDateWhen { false }
+        doFirst { dir.mkdirs() }
+    } else {
+        exclude("**/screenshots/**")
+    }
 }

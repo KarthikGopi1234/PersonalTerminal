@@ -145,7 +145,7 @@ fun PhotoPickerRow(
                 if (showRemove && state.photoPath != null) TermButton("remove", color = p.red, onClick = { state.clear() })
             }
         }
-        state.error?.let { Comment("# $it", color = p.red) }
+        state.error?.let { Comment(it, color = p.red) }
     }
 }
 

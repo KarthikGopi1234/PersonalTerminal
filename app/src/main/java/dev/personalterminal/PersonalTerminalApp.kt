@@ -24,9 +24,12 @@ import kotlinx.coroutines.launch
 /**
  * Manual dependency container (the app is small enough that Hilt would be overkill).
  */
-class PersonalTerminalApp : Application() {
+open class PersonalTerminalApp : Application() {
 
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** Whether a fresh install gets the starter habits. Tooling (the screenshot suite) seeds its own data instead. */
+    protected open val seedStarterHabits: Boolean get() = true
 
     val db: AppDatabase by lazy { AppDatabase.get(this) }
     val prefs: UserPrefs by lazy { UserPrefs(this) }
@@ -38,12 +41,16 @@ class PersonalTerminalApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        WorkManager.initialize(this, Configuration.Builder().setMinimumLoggingLevel(android.util.Log.INFO).build())
+        // Manual init (the manifest disables WorkManagerInitializer). Guarded because the process can
+        // outlive this Application instance in tests/tooling, and initialize() throws when repeated.
+        if (!WorkManager.isInitialized()) {
+            WorkManager.initialize(this, Configuration.Builder().setMinimumLoggingLevel(android.util.Log.INFO).build())
+        }
         createChannels()
 
         scope.launch {
             // First launch: seed a friendly starter set.
-            if (!prefs.current().onboarded) {
+            if (seedStarterHabits && !prefs.current().onboarded) {
                 habits.seedDefaults()
             }
             // Re-arm periodic backup schedule from persisted settings.
