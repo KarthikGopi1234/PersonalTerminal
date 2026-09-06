@@ -46,7 +46,7 @@ class DriveSync(
             val folderId = current.driveFolderId.ifBlank { client.ensureFolder() }
             if (folderId != current.driveFolderId) prefs.setDriveAccount(current.driveAccountEmail, folderId)
             val archive = backups.createLocalArchive()
-            val remote = client.upload(folderId, archive, BackupManager.MIME)
+            val remote = client.upload(folderId, archive, if (archive.name.endsWith(BackupManager.EXT_ENCRYPTED)) BackupManager.MIME_ENCRYPTED else BackupManager.MIME)
             client.prune(folderId, DriveClient.KEEP_BACKUPS)
             archive.delete()
             val msg = "uploaded ${remote.name} (${remote.size / 1024} KB)"
@@ -72,7 +72,7 @@ class DriveSync(
         }
     }
 
-    suspend fun restoreRemote(fileId: String, accessToken: String? = null): Outcome {
+    suspend fun restoreRemote(fileId: String, accessToken: String? = null, passphrase: String? = null): Outcome {
         val token = accessToken ?: when (val a = auth.authorizeDrive()) {
             is GoogleAuth.AuthzResult.Granted -> a.accessToken
             is GoogleAuth.AuthzResult.NeedsResolution -> return Outcome.NeedsConsent(a.intent)
@@ -81,9 +81,11 @@ class DriveSync(
         return try {
             val tmp = File(context.cacheDir, "restore_${System.currentTimeMillis()}.${BackupManager.EXT}")
             FileOutputStream(tmp).use { DriveClient(token).download(fileId, it) }
-            val summary = FileInputStream(tmp).use { backups.restoreArchive(it) }
+            val summary = FileInputStream(tmp).use { backups.restoreArchive(it, passphrase) }
             tmp.delete()
             Outcome.Success(summary)
+        } catch (e: BackupManager.PassphraseRequired) {
+            Outcome.Failure(e.message ?: "passphrase required")
         } catch (e: Exception) {
             Log.w(TAG, "restore failed", e)
             fail(e.message ?: e.javaClass.simpleName)

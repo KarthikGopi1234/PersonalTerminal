@@ -1,5 +1,6 @@
 package dev.personalterminal.ui.today
 
+import dev.personalterminal.domain.AppClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -56,6 +57,10 @@ import dev.personalterminal.ui.theme.Term
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.ImeAction
+import dev.personalterminal.automation.Commands
+import dev.personalterminal.ui.components.TermTextField
 import java.time.format.DateTimeFormatter
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -63,14 +68,28 @@ import java.time.format.DateTimeFormatter
 fun TodayScreen(app: PersonalTerminalApp, nav: NavHostController) {
     val p = Term.palette
     val scope = rememberCoroutineScope()
-    var date by remember { mutableStateOf(LocalDate.now()) }
+    var date by remember { mutableStateOf(AppClock.today()) }
     val summary by remember { snapshotFlow { date }.flatMapLatest { app.habits.observeDay(it) } }
         .collectAsStateWithLifecycle(initialValue = null)
     val wearToday by remember(date) { app.watches.observeWearForDay(date) }.collectAsStateWithLifecycle(initialValue = emptyList())
     val settings by app.prefs.settings.collectAsStateWithLifecycle(initialValue = dev.personalterminal.data.prefs.Settings())
 
-    val isToday = date == LocalDate.now()
+    val isToday = date == AppClock.today()
     val s = summary
+    val ctx = LocalContext.current
+    var command by remember { mutableStateOf("") }
+    var output by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+    var expanded by remember { mutableStateOf<Long?>(null) }
+    fun runCommand() {
+        val line = command
+        if (line.isBlank()) return
+        scope.launch {
+            val r = Commands.run(ctx, app, line, date)
+            output = r.ok to (if (r.message.isBlank()) "" else "$ $line\n${r.message}")
+            command = ""
+            r.navigate?.let { route -> runCatching { nav.navigate(route) } }
+        }
+    }
 
     LazyColumn(
         Modifier.fillMaxSize().statusBarsPadding(),
@@ -84,10 +103,27 @@ fun TodayScreen(app: PersonalTerminalApp, nav: NavHostController) {
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("< prev", color = p.cyan, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clickable { date = date.minusDays(1) }.padding(4.dp))
-                if (!isToday) Text("[ today ]", color = p.yellow, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clickable { date = LocalDate.now() }.padding(4.dp))
+                if (!isToday) Text("[ today ]", color = p.yellow, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clickable { date = AppClock.today() }.padding(4.dp))
                 else Text(settings.prompt, color = p.fgDim, style = MaterialTheme.typography.labelSmall)
                 Text("next >", color = if (isToday) p.fgDim else p.cyan, style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.alpha(if (isToday) 0.4f else 1f).clickable(enabled = !isToday) { date = date.plusDays(1) }.padding(4.dp))
+            }
+        }
+        item(key = "cmdline") {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("$ ", color = p.green, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+                    TermTextField(
+                        value = command, onValueChange = { command = it }, placeholder = "done stretch · add 2 water · timer 25 · wear speedy · help",
+                        singleLine = true, imeAction = ImeAction.Go, onImeAction = { runCommand() }, modifier = Modifier.weight(1f),
+                    )
+                    if (command.isNotBlank()) Text(" ↵", color = p.cyan, style = MaterialTheme.typography.titleMedium, modifier = Modifier.clickable { runCommand() }.padding(4.dp))
+                }
+                val out = output
+                if (out != null && out.second.isNotBlank()) {
+                    Text(out.second, color = if (out.first) p.fgDim else p.red, style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(start = 4.dp, top = 2.dp).clickable { output = null })
+                }
             }
         }
         if (s == null) {
@@ -129,6 +165,11 @@ fun TodayScreen(app: PersonalTerminalApp, nav: NavHostController) {
                     onOpen = { nav.navigate(Routes.habitDetail(hs.habit.id)) },
                     onShield = { day -> scope.launch { app.habits.useShield(hs.habit.id, day) } },
                     shieldsAvailable = s.shieldsAvailable,
+                    expanded = expanded == hs.habit.id,
+                    onExpand = { expanded = if (expanded == hs.habit.id) null else hs.habit.id },
+                    onSkip = { reason -> scope.launch { app.habits.skip(hs.habit.id, reason, date); expanded = null } },
+                    onUnskip = { scope.launch { app.habits.unskip(hs.habit.id, date) } },
+                    onAnnotate = { note, mood -> scope.launch { app.habits.annotate(hs.habit.id, date, note = note, mood = mood) } },
                 )
             }
             if (offDay.isNotEmpty()) {
@@ -210,32 +251,51 @@ fun HabitRow(
     onOpen: () -> Unit,
     onShield: (LocalDate) -> Unit,
     shieldsAvailable: Int,
+    expanded: Boolean = false,
+    onExpand: () -> Unit = {},
+    onSkip: (String) -> Unit = {},
+    onUnskip: () -> Unit = {},
+    onAnnotate: (String?, Int?) -> Unit = { _, _ -> },
 ) {
     val p = Term.palette
     val color = p.named(hs.habit.color)
     val h = hs.habit
+    val struck = hs.completed && !h.negative
     Column(
         Modifier
             .fillMaxWidth()
-            .background(if (hs.completed) p.bgAlt.copy(alpha = 0.5f) else p.bgAlt, RoundedCornerShape(6.dp))
-            .combinedClickable(onClick = { if (h.type == HabitType.CHECKBOX) onToggle() else onOpen() }, onLongClick = onOpen)
+            .background(if (hs.completed || hs.skipped) p.bgAlt.copy(alpha = 0.5f) else p.bgAlt, RoundedCornerShape(6.dp))
+            .combinedClickable(onClick = { if (h.type == HabitType.CHECKBOX && !h.negative && !hs.skipped) onToggle() else onExpand() }, onLongClick = onExpand)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            BracketCheckbox(checked = hs.completed, partial = hs.value > 0 && !hs.completed, color = color,
-                modifier = Modifier.clickable(onClick = onToggle))
+            when {
+                hs.skipped -> Text("[»]", color = p.fgDim, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = onUnskip))
+                h.negative -> Text(if (hs.slipped) "[✗]" else "[✓]", color = if (hs.slipped) p.red else color, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable(onClick = onToggle))
+                else -> BracketCheckbox(checked = hs.completed, partial = hs.value > 0 && !hs.completed, color = color,
+                    modifier = Modifier.clickable(onClick = onToggle))
+            }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    h.name, color = if (hs.completed) p.fgDim else p.fg,
-                    textDecoration = if (hs.completed) TextDecoration.LineThrough else null,
+                    h.name, color = if (struck || hs.skipped) p.fgDim else if (hs.slipped) p.red else p.fg,
+                    textDecoration = if (struck) TextDecoration.LineThrough else null,
                     style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (hs.streak.current > 0) Text("⚡${hs.streak.current}", color = p.orange, style = MaterialTheme.typography.labelSmall)
                     if (hs.streak.shieldedDays > 0) Text("⛨${hs.streak.shieldedDays}", color = p.cyan, style = MaterialTheme.typography.labelSmall)
-                    val sched = if (h.schedule == ScheduleType.WEEKLY) "${hs.weekCount}/${h.timesPerWeek} this week" else Schedule.describe(h)
-                    Text(sched, color = p.fgDim, style = MaterialTheme.typography.labelSmall)
+                    val sched = when {
+                        hs.skipped -> "skipped" + (hs.log?.skipReason?.takeIf { it.isNotBlank() }?.let { ": $it" } ?: "")
+                        h.negative -> if (hs.slipped) "slipped today" else "avoid · clean so far"
+                        h.schedule == ScheduleType.WEEKLY -> "${hs.weekCount}/${h.timesPerWeek} this week"
+                        else -> Schedule.describe(h)
+                    }
+                    Text(sched, color = p.fgDim, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (hs.mood > 0) Text("★".repeat(hs.mood), color = p.yellow, style = MaterialTheme.typography.labelSmall)
+                    if (hs.note.isNotBlank()) Text("✎", color = p.cyan, style = MaterialTheme.typography.labelSmall)
+                    if (h.reminderMinutes >= 0) Text("⏰", color = p.fgDim, style = MaterialTheme.typography.labelSmall)
                 }
             }
             when (h.type) {
@@ -265,5 +325,64 @@ fun HabitRow(
                 TermButton("use shield ⛨", onClick = { onShield(repair) }, color = p.cyan)
             }
         }
+        if (expanded) {
+            Spacer(Modifier.height(8.dp))
+            RowActions(hs = hs, color = color, onOpen = onOpen, onSkip = onSkip, onUnskip = onUnskip, onAnnotate = onAnnotate, onToggle = onToggle)
+        }
+    }
+}
+
+/** Expanded strip under a habit row: skip with reason, note, mood, open. */
+@Composable
+private fun RowActions(
+    hs: HabitStatus,
+    color: androidx.compose.ui.graphics.Color,
+    onOpen: () -> Unit,
+    onSkip: (String) -> Unit,
+    onUnskip: () -> Unit,
+    onAnnotate: (String?, Int?) -> Unit,
+    onToggle: () -> Unit,
+) {
+    val p = Term.palette
+    var mode by remember(hs.habit.id) { mutableStateOf("") }
+    var text by remember(hs.habit.id, mode) { mutableStateOf(if (mode == "note") hs.note else "") }
+    Column(Modifier.fillMaxWidth().background(p.bg.copy(alpha = 0.4f), RoundedCornerShape(4.dp)).padding(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("mood", color = p.fgDim, style = MaterialTheme.typography.labelSmall)
+            (1..5).forEach { m ->
+                Text(if (m <= hs.mood) "★" else "☆", color = if (m <= hs.mood) p.yellow else p.fgDim, style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.clickable { onAnnotate(null, if (hs.mood == m) 0 else m) }.padding(horizontal = 2.dp))
+            }
+            Spacer(Modifier.weight(1f))
+            if (hs.habit.negative) TermButton(if (hs.slipped) "clear slip" else "log slip", color = p.red, onClick = onToggle)
+            if (hs.skipped) TermButton("unskip", color = p.cyan, onClick = onUnskip)
+            else TermButton("skip", color = if (mode == "skip") p.yellow else p.fgDim, onClick = { mode = if (mode == "skip") "" else "skip" })
+            TermButton("note", color = if (mode == "note") p.cyan else p.fgDim, onClick = { mode = if (mode == "note") "" else "note" })
+            TermButton("open", color = color, onClick = onOpen)
+        }
+        if (mode == "skip") {
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("sick", "travel", "rest day", "no time").forEach { r -> Tag(r, p.yellow, Modifier.clickable { onSkip(r) }) }
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TermTextField(value = text, onValueChange = { text = it }, placeholder = "other reason…", singleLine = true, imeAction = ImeAction.Done,
+                    onImeAction = { onSkip(text) }, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(6.dp))
+                TermButton("skip today", color = p.yellow, onClick = { onSkip(text) })
+            }
+            Comment("a skip bridges the streak without spending a shield")
+        }
+        if (mode == "note") {
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TermTextField(value = text, onValueChange = { text = it }, placeholder = "how did it go?", singleLine = true, imeAction = ImeAction.Done,
+                    onImeAction = { onAnnotate(text, null); mode = "" }, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(6.dp))
+                TermButton("save", color = p.cyan, onClick = { onAnnotate(text, null); mode = "" })
+            }
+        }
+        if (hs.note.isNotBlank() && mode != "note") Comment("✎ ${hs.note}", color = p.cyan)
     }
 }

@@ -9,6 +9,10 @@ import dev.personalterminal.data.db.ShieldUse
 import dev.personalterminal.data.db.Watch
 import dev.personalterminal.data.db.WearLog
 import dev.personalterminal.data.db.XpEvent
+import dev.personalterminal.data.db.FocusSession
+import dev.personalterminal.data.db.WatchService
+import dev.personalterminal.data.db.AccuracyReading
+import dev.personalterminal.data.db.Strap
 import dev.personalterminal.data.prefs.Settings
 import dev.personalterminal.data.prefs.UserPrefs
 import dev.personalterminal.data.repo.WatchRepository
@@ -34,7 +38,7 @@ import java.util.zip.ZipOutputStream
 /** Serialisable snapshot of the whole database + user preferences. */
 @Serializable
 data class BackupPayload(
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int = 2,
     val appVersion: String,
     val createdAt: Long,
     val routines: List<Routine>,
@@ -45,6 +49,11 @@ data class BackupPayload(
     val wearLogs: List<WearLog>,
     val xpEvents: List<XpEvent>,
     val settings: BackupSettings,
+    // schema 2 (0.3): optional so schema-1 archives still restore
+    val focusSessions: List<FocusSession> = emptyList(),
+    val watchServices: List<WatchService> = emptyList(),
+    val accuracyReadings: List<AccuracyReading> = emptyList(),
+    val straps: List<Strap> = emptyList(),
 )
 
 @Serializable
@@ -56,10 +65,19 @@ data class BackupSettings(
     val pomodoroFocusMin: Int,
     val pomodoroBreakMin: Int,
     val pomodoroLongBreakMin: Int,
+    val fontName: String = "jetbrains",
+    val customPaletteJson: String = "",
+    val quietStartMin: Int = 22 * 60,
+    val quietEndMin: Int = 7 * 60,
+    val remindersEnabled: Boolean = true,
+    val crtEffect: Boolean = false,
+    val accessibilityMode: Boolean = false,
 ) {
     companion object {
-        fun from(s: Settings) = BackupSettings(s.themeName, s.themeMode.name, s.username, s.hostname,
-            s.pomodoroFocusMin, s.pomodoroBreakMin, s.pomodoroLongBreakMin)
+        fun from(s: Settings) = BackupSettings(
+            s.themeName, s.themeMode.name, s.username, s.hostname, s.pomodoroFocusMin, s.pomodoroBreakMin, s.pomodoroLongBreakMin,
+            s.fontName, s.customPaletteJson, s.quietStartMin, s.quietEndMin, s.remindersEnabled, s.crtEffect, s.accessibilityMode,
+        )
     }
 }
 
@@ -91,11 +109,29 @@ class BackupManager(
             wearLogs = db.wearLogDao().getAll(),
             xpEvents = db.xpDao().getAll(),
             settings = BackupSettings.from(s),
+            focusSessions = db.focusSessionDao().getAll(),
+            watchServices = db.watchServiceDao().getAll(),
+            accuracyReadings = db.accuracyDao().getAll(),
+            straps = db.strapDao().getAll(),
         )
     }
 
-    /** Writes a full archive to [out]. Returns number of media files included. */
-    suspend fun writeArchive(out: OutputStream): Int = withContext(Dispatchers.IO) {
+    /**
+     * Writes a full archive to [out]. Returns number of media files included. When the user set a
+     * backup passphrase the zip is wrapped in [BackupCrypto]'s AES-256-GCM envelope (`.ptbakx`).
+     */
+    suspend fun writeArchive(out: OutputStream, passphrase: String? = null): Int = withContext(Dispatchers.IO) {
+        val pass = passphrase ?: prefs.current().backupPassphrase
+        if (pass.isNotBlank()) {
+            val plain = java.io.ByteArrayOutputStream()
+            val n = writePlainArchive(plain)
+            BufferedOutputStream(out).use { it.write(BackupCrypto.encrypt(plain.toByteArray(), pass)) }
+            return@withContext n
+        }
+        writePlainArchive(out)
+    }
+
+    private suspend fun writePlainArchive(out: OutputStream): Int = withContext(Dispatchers.IO) {
         val payload = buildPayload()
         var media = 0
         ZipOutputStream(BufferedOutputStream(out)).use { zip ->
@@ -121,13 +157,37 @@ class BackupManager(
     suspend fun createLocalArchive(): File = withContext(Dispatchers.IO) {
         // keep only the newest local archive to save space
         backupDir.listFiles()?.forEach { it.delete() }
-        val file = File(backupDir, fileName())
+        val file = File(backupDir, fileName(encrypted = prefs.current().backupPassphrase.isNotBlank()))
         FileOutputStream(file).use { writeArchive(it) }
         file
     }
 
-    /** Restores an archive. Replaces ALL local data. Returns a short human-readable summary. */
-    suspend fun restoreArchive(input: InputStream): String = withContext(Dispatchers.IO) {
+    /** Thrown when an encrypted archive is opened without (or with the wrong) passphrase. */
+    class PassphraseRequired(message: String) : Exception(message)
+
+    /**
+     * Restores an archive (plain `.ptbak` or encrypted `.ptbakx`). Replaces ALL local data.
+     * Returns a short human-readable summary. Throws [PassphraseRequired] for encrypted archives
+     * when [passphrase] is missing or wrong (the stored backup passphrase is tried first).
+     */
+    suspend fun restoreArchive(input: InputStream, passphrase: String? = null): String = withContext(Dispatchers.IO) {
+        val buffered = BufferedInputStream(input)
+        buffered.mark(BackupCrypto.MAGIC.size)
+        val head = ByteArray(BackupCrypto.MAGIC.size)
+        val read = buffered.read(head)
+        buffered.reset()
+        if (read == head.size && head.contentEquals(BackupCrypto.MAGIC)) {
+            val bytes = buffered.readBytes()
+            val candidates = listOfNotNull(passphrase, prefs.current().backupPassphrase.takeIf { it.isNotBlank() })
+            if (candidates.isEmpty()) throw PassphraseRequired("archive is encrypted – enter the backup passphrase")
+            val plain = candidates.firstNotNullOfOrNull { p -> runCatching { BackupCrypto.decrypt(bytes, p) }.getOrNull() }
+                ?: throw PassphraseRequired("wrong passphrase for this archive")
+            return@withContext restorePlain(java.io.ByteArrayInputStream(plain))
+        }
+        restorePlain(buffered)
+    }
+
+    private suspend fun restorePlain(input: InputStream): String = withContext(Dispatchers.IO) {
         var payload: BackupPayload? = null
         val stagedMedia = File(context.cacheDir, "restore_media_${System.currentTimeMillis()}").apply { mkdirs() }
         try {
@@ -167,21 +227,54 @@ class BackupManager(
         db.watchDao().insertAll(p.watches)
         db.wearLogDao().insertAll(p.wearLogs)
         db.xpDao().insertAll(p.xpEvents)
+        db.focusSessionDao().insertAll(p.focusSessions)
+        db.watchServiceDao().insertAll(p.watchServices)
+        db.accuracyDao().insertAll(p.accuracyReadings)
+        db.strapDao().insertAll(p.straps)
         prefs.setTheme(p.settings.themeName)
         runCatching { dev.personalterminal.data.prefs.ThemeMode.valueOf(p.settings.themeMode) }.getOrNull()?.let { prefs.setThemeMode(it) }
         prefs.setUsername(p.settings.username)
         prefs.setHostname(p.settings.hostname)
         prefs.setPomodoro(p.settings.pomodoroFocusMin, p.settings.pomodoroBreakMin, p.settings.pomodoroLongBreakMin)
+        prefs.setFont(p.settings.fontName)
+        if (p.settings.customPaletteJson.isNotBlank()) prefs.setCustomPalette(p.settings.customPaletteJson)
+        prefs.setQuietHours(p.settings.quietStartMin, p.settings.quietEndMin)
+        prefs.setRemindersEnabled(p.settings.remindersEnabled)
+        prefs.setCrt(p.settings.crtEffect)
+        prefs.setAccessibilityMode(p.settings.accessibilityMode)
     }
 
-    fun fileName(now: Long = System.currentTimeMillis()): String =
-        "personal-terminal_${DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").format(Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()))}.$EXT"
+    /** Merge-import (used by the Loop / Habitica importers): adds rows without wiping anything. */
+    suspend fun importHabits(routines: List<Routine>, habits: List<Habit>, logs: List<HabitLog>): String = withContext(Dispatchers.IO) {
+        var newHabits = 0; var newLogs = 0
+        val routineIds = mutableMapOf<String, Long>()
+        routines.forEach { r ->
+            val existing = db.routineDao().getAll().firstOrNull { it.name.equals(r.name, true) }
+            routineIds[r.name] = existing?.id ?: db.routineDao().insert(r.copy(id = 0, position = db.routineDao().getAll().size))
+        }
+        val existingHabits = db.habitDao().getAll()
+        habits.forEach { h ->
+            val routineId = h.routineId?.let { rid -> routines.firstOrNull { it.id == rid }?.let { routineIds[it.name] } }
+            val match = existingHabits.firstOrNull { it.name.equals(h.name, true) }
+            val id = match?.id ?: db.habitDao().insert(h.copy(id = 0, routineId = routineId, position = db.habitDao().nextPosition())).also { newHabits++ }
+            val mine = logs.filter { it.habitId == h.id }
+            mine.forEach { l ->
+                if (db.habitLogDao().get(id, l.day) == null) { db.habitLogDao().upsert(l.copy(habitId = id)); newLogs++ }
+            }
+        }
+        "imported $newHabits new habits and $newLogs log entries"
+    }
+
+    fun fileName(now: Long = System.currentTimeMillis(), encrypted: Boolean = false): String =
+        "personal-terminal_${DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").format(Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()))}.${if (encrypted) EXT_ENCRYPTED else EXT}"
 
     private fun fmt(ms: Long) = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()))
 
     companion object {
         const val EXT = "ptbak"
+        const val EXT_ENCRYPTED = "ptbakx"
         const val MIME = "application/zip"
+        const val MIME_ENCRYPTED = "application/octet-stream"
         const val ENTRY_DATA = "data.json"
         const val ENTRY_MEDIA_DIR = "media/"
     }

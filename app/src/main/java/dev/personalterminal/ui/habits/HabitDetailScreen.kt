@@ -1,5 +1,6 @@
 package dev.personalterminal.ui.habits
 
+import dev.personalterminal.domain.AppClock
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -34,6 +35,11 @@ import dev.personalterminal.ui.components.KeyValue
 import dev.personalterminal.ui.components.PromptLine
 import dev.personalterminal.ui.components.Stepper
 import dev.personalterminal.ui.components.TermButton
+import dev.personalterminal.ui.components.TermTextField
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import dev.personalterminal.ui.components.TerminalPanel
 import dev.personalterminal.ui.components.sparkline
 import dev.personalterminal.ui.navigation.Routes
@@ -47,7 +53,7 @@ fun HabitDetailScreen(app: PersonalTerminalApp, nav: NavHostController, habitId:
     val p = Term.palette
     val scope = rememberCoroutineScope()
     val hwl by remember(habitId) { app.habits.observeHabitWithLogs(habitId) }.collectAsStateWithLifecycle(initialValue = null)
-    val today = LocalDate.now()
+    val today = AppClock.today()
     val data = hwl
 
     Column(
@@ -64,13 +70,23 @@ fun HabitDetailScreen(app: PersonalTerminalApp, nav: NavHostController, habitId:
         PromptLine("habit show ${h.name}", trailing = if (h.archived) "archived" else null)
 
         TerminalPanel(title = "today", titleColor = color) {
-            when (h.type) {
-                HabitType.CHECKBOX -> Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            val slipped = h.negative && todayLog != null && !todayLog.completed && todayLog.value > 0 && !todayLog.skipped
+            when {
+                todayLog?.skipped == true -> Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text("[»] skipped" + (todayLog.skipReason.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""), color = p.fgDim, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    TermButton("unskip", color = p.cyan, onClick = { scope.launch { app.habits.unskip(h.id, today) } })
+                }
+                h.negative -> Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(if (slipped) "[✗] slipped today" else "[✓] clean so far", color = if (slipped) p.red else color, style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.weight(1f))
+                    TermButton(if (slipped) "clear slip" else "log a slip", color = p.red, onClick = { scope.launch { app.habits.logSlip(h.id, !slipped, today) } })
+                }
+                h.type == HabitType.CHECKBOX -> Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(if (todayLog?.completed == true) "[✓] done" else "[ ] not yet", color = if (todayLog?.completed == true) color else p.fg, style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.weight(1f))
                     TermButton(if (todayLog?.completed == true) "undo" else "mark done", color = color, onClick = { scope.launch { app.habits.toggle(h.id, today) } })
                 }
-                HabitType.COUNTER -> Column {
+                h.type == HabitType.COUNTER -> Column {
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         Stepper(value = value, onChange = { scope.launch { app.habits.setValue(h.id, it, today) } }, min = 0, max = 100_000, color = color, suffix = "/${h.target}")
                         Spacer(Modifier.weight(1f))
@@ -79,11 +95,11 @@ fun HabitDetailScreen(app: PersonalTerminalApp, nav: NavHostController, habitId:
                     Spacer(Modifier.height(6.dp))
                     AsciiProgress(fraction = value.toFloat() / h.target.coerceAtLeast(1), width = 24, color = color)
                 }
-                HabitType.TIMER -> Column {
+                else -> Column {
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         Text("$value / ${h.target} min", color = p.fg, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.weight(1f))
-                        TermButton("▶ focus", color = color, onClick = { nav.navigate(Routes.timer(h.id)) })
+                        TermButton("▶ focus" + (if (h.focusMinutes > 0) " ${h.focusMinutes}m" else ""), color = color, onClick = { nav.navigate(Routes.timer(h.id)) })
                     }
                     Spacer(Modifier.height(6.dp))
                     AsciiProgress(fraction = value.toFloat() / h.target.coerceAtLeast(1), width = 24, color = color)
@@ -96,35 +112,94 @@ fun HabitDetailScreen(app: PersonalTerminalApp, nav: NavHostController, habitId:
             }
         }
 
+        // ---- note / mood / skip for today
+        TerminalPanel(title = "log", titleColor = p.cyan) {
+            var note by remember(todayLog?.note) { mutableStateOf(todayLog?.note ?: "") }
+            var skipReason by remember { mutableStateOf("") }
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("mood ", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+                (1..5).forEach { m ->
+                    val sel = (todayLog?.mood ?: 0) >= m
+                    Text(if (sel) "★" else "☆", color = if (sel) p.yellow else p.fgDim, style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.clickable { scope.launch { app.habits.annotate(h.id, today, mood = if (todayLog?.mood == m) 0 else m) } }.padding(horizontal = 2.dp))
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                TermTextField(value = note, onValueChange = { note = it }, placeholder = "completion note…", singleLine = true,
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Done, onImeAction = { scope.launch { app.habits.annotate(h.id, today, note = note) } }, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(6.dp))
+                TermButton("save", color = p.cyan, enabled = note != (todayLog?.note ?: ""), onClick = { scope.launch { app.habits.annotate(h.id, today, note = note) } })
+            }
+            if (todayLog?.skipped != true) {
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    TermTextField(value = skipReason, onValueChange = { skipReason = it }, placeholder = "skip today because…", singleLine = true,
+                        imeAction = androidx.compose.ui.text.input.ImeAction.Done, onImeAction = { scope.launch { app.habits.skip(h.id, skipReason, today) } }, modifier = Modifier.weight(1f))
+                    Spacer(Modifier.width(6.dp))
+                    TermButton("skip", color = p.yellow, onClick = { scope.launch { app.habits.skip(h.id, skipReason, today) } })
+                }
+                Comment("a skip keeps the streak alive without spending a shield")
+            }
+            val recentNotes = data.logs.filter { it.note.isNotBlank() || it.skipped }.sortedByDescending { it.day }.take(5)
+            if (recentNotes.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                recentNotes.forEach { l ->
+                    val d = java.time.LocalDate.ofEpochDay(l.day).format(DateTimeFormatter.ofPattern("MMM dd"))
+                    Text(
+                        "$d  " + (if (l.skipped) "» skipped" + (if (l.skipReason.isNotBlank()) " (${l.skipReason})" else "") else "✎ ${l.note}") + (if (l.mood > 0) "  ${"★".repeat(l.mood)}" else ""),
+                        color = if (l.skipped) p.fgDim else p.fg, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                }
+                Text("all notes →", color = p.cyan, style = MaterialTheme.typography.labelSmall, modifier = Modifier.clickable { nav.navigate(Routes.JOURNAL) }.padding(top = 4.dp))
+            }
+        }
+
         TerminalPanel(title = "streak") {
             KeyValue("current", "⚡ ${streak.current}", valueColor = p.orange)
             KeyValue("best", "${streak.best}")
             KeyValue("total completions", "${streak.completions}")
             KeyValue("shielded days", "${streak.shieldedDays}", valueColor = p.cyan)
-            KeyValue("schedule", Schedule.describe(h))
+            KeyValue("schedule", Schedule.describe(h) + if (h.negative) " · avoid" else "")
             if (h.type != HabitType.CHECKBOX) KeyValue("target", "${h.target} ${h.unit}".trim())
-            val last14 = (13 downTo 0).map { i ->
-                val d = today.minusDays(i.toLong()).toEpochDay()
-                val l = data.logs.firstOrNull { it.day == d }
-                if (l == null) 0f else if (h.type == HabitType.CHECKBOX) (if (l.completed) 1f else 0f) else (l.value.toFloat() / h.target.coerceAtLeast(1)).coerceIn(0f, 1f)
+            if (h.reminderMinutes >= 0) KeyValue("reminder", "%02d:%02d".format(h.reminderMinutes / 60, h.reminderMinutes % 60))
+            val skips = data.logs.count { it.skipped }
+            if (skips > 0) KeyValue("skipped days", "$skips")
+            dev.personalterminal.domain.Insights.bestWeekday(h, data.logs)?.let { (dow, rate) ->
+                if (rate > 0f) KeyValue("best weekday", "${dow.name.lowercase().replaceFirstChar { it.uppercase() }} (${(rate * 100).toInt()}%)")
             }
+            val hv = remember(data) { dev.personalterminal.domain.Insights.heatmapValues(h, data.logs) }
+            val last14 = (13 downTo 0).map { i -> hv[today.minusDays(i.toLong()).toEpochDay()] ?: 0f }
             Spacer(Modifier.height(6.dp))
             Row { Text("last 14d ", color = p.fgDim, style = MaterialTheme.typography.bodyMedium); Text(sparkline(last14), color = color, style = MaterialTheme.typography.bodyMedium) }
         }
 
-        TerminalPanel(title = "history") {
-            val values = remember(data) {
-                data.logs.associate { l ->
-                    l.day to if (h.type == HabitType.CHECKBOX) (if (l.completed) 1f else 0f)
-                    else (l.value.toFloat() / h.target.coerceAtLeast(1)).coerceIn(0f, 1f)
-                }
-            }
+        TerminalPanel(title = "history · ${h.name}") {
+            val values = remember(data) { dev.personalterminal.domain.Insights.heatmapValues(h, data.logs) }
             Row(Modifier.horizontalScroll(rememberScrollState(), reverseScrolling = true)) {
                 ContributionHeatmap(values = values, weeks = 26, color = color, onDayClick = { d ->
                     if (!d.isAfter(today)) scope.launch { app.habits.toggle(h.id, d) }
                 })
             }
-            Comment("tap a cell to toggle that day")
+            val doneDays = data.logs.count { it.completed && !it.skipped }
+            val span = maxOf(1L, today.toEpochDay() - (data.logs.minOfOrNull { it.day } ?: today.toEpochDay()) + 1)
+            Comment("tap a cell to toggle that day · $doneDays/${span} days (${(doneDays * 100 / span)}%)")
+        }
+
+        if (h.type == HabitType.TIMER) {
+            val sessions by remember(h.id) { app.habits.observeFocusSessionsFor(h.id) }.collectAsStateWithLifecycle(initialValue = emptyList())
+            TerminalPanel(title = "sessions", titleColor = p.orange) {
+                if (sessions.isEmpty()) Comment("no focus sessions logged yet – start one with ▶ focus")
+                sessions.take(5).forEach { se ->
+                    val d = java.time.Instant.ofEpochMilli(se.startedAt).atZone(java.time.ZoneId.systemDefault())
+                    Row {
+                        Text(d.format(DateTimeFormatter.ofPattern("MMM dd HH:mm")), color = p.fgDim, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                        Text("${se.minutes}m ${if (se.kind == "stopwatch") "⏱" else "🍅"}${if (!se.completed) " (partial)" else ""}", color = p.fg, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                KeyValue("total", "${sessions.sumOf { it.minutes }} min in ${sessions.size} sessions", valueColor = p.orange)
+                if (sessions.size > 5) Text("all sessions →", color = p.cyan, style = MaterialTheme.typography.labelSmall, modifier = Modifier.clickable { nav.navigate(Routes.SESSIONS) }.padding(top = 4.dp))
+            }
         }
 
         if (h.notes.isNotBlank()) TerminalPanel(title = "notes") { Text(h.notes, color = p.fg, style = MaterialTheme.typography.bodyMedium) }

@@ -31,6 +31,15 @@ import dev.personalterminal.ui.theme.TerminalTheme
 import dev.personalterminal.ui.timeline.TimelineScreen
 import dev.personalterminal.ui.timer.TimerScreen
 import dev.personalterminal.ui.today.TodayScreen
+import dev.personalterminal.ui.insights.ReviewScreen
+import dev.personalterminal.ui.insights.AchievementsScreen
+import dev.personalterminal.ui.insights.InsightsScreen
+import dev.personalterminal.ui.habits.TemplatesScreen
+import dev.personalterminal.ui.habits.HabitEditScreen
+import dev.personalterminal.ui.habits.JournalScreen
+import dev.personalterminal.ui.timer.SessionsScreen
+import dev.personalterminal.ui.watch.WatchStatsScreen
+import dev.personalterminal.ui.watch.StrapsScreen
 import dev.personalterminal.ui.watch.WatchDetailScreen
 import dev.personalterminal.ui.watch.WatchesScreen
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -68,11 +77,16 @@ class ScreenshotSuite {
 
     private val app: PersonalTerminalApp get() = ApplicationProvider.getApplicationContext()
     private val outDir: File? = System.getProperty("screenshots.dir")?.let(::File)
-    private val today: LocalDate = LocalDate.now()
+    /** Pinned so the goldens do not drift with the calendar (a Saturday, mid-month, no DST edge). */
+    private val today: LocalDate = LocalDate.of(2026, 9, 12)
 
     @Before
     fun seed() {
         org.junit.Assume.assumeTrue("screenshots.dir not set – screenshot suite skipped", outDir != null)
+        java.util.Locale.setDefault(java.util.Locale.US) // month / weekday names in the goldens
+        dev.personalterminal.domain.AppClock.clock = java.time.Clock.fixed(
+            today.atTime(10, 30).atZone(java.time.ZoneId.systemDefault()).toInstant(), java.time.ZoneId.systemDefault(),
+        )
         // Grant what a real user grants on first run, so the timer screen shows the normal state.
         Shadows.shadowOf(app).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
         runBlocking { DemoData.seed(app, today) }
@@ -108,6 +122,16 @@ class ScreenshotSuite {
     @Test fun themeNordLight() = shoot("10-theme-nord-light", Tab.TODAY, theme = "nord", dark = false) { nav -> TodayScreen(app, nav) }
     @Test fun themeGruvbox() = shoot("11-theme-gruvbox", Tab.PROFILE, theme = "gruvbox") { nav -> ProfileScreen(app, nav) }
     @Test fun themeSolarizedLight() = shoot("12-theme-solarized-light", Tab.HABITS, theme = "solarized", dark = false) { nav -> HabitsScreen(app, nav) }
+    @Test fun review() = shoot("13-review", Tab.PROFILE) { nav -> ReviewScreen(app, nav) }
+    @Test fun achievements() = shoot("14-achievements", Tab.PROFILE) { nav -> AchievementsScreen(app, nav) }
+    @Test fun insights() = shoot("15-insights", Tab.PROFILE) { nav -> InsightsScreen(app, nav) }
+    @Test fun templates() = shoot("16-templates", Tab.HABITS) { nav -> TemplatesScreen(app, nav) }
+    @Test fun sessions() = shoot("17-sessions", Tab.TIMER) { nav -> SessionsScreen(app, nav) }
+    @Test fun watchStats() = shoot("18-watch-stats", Tab.WATCH) { nav -> WatchStatsScreen(app, nav) }
+    @Test fun straps() = shoot("19-straps", Tab.WATCH) { nav -> StrapsScreen(app, nav) }
+    @Test fun habitEdit() = shoot("20-habit-edit", Tab.HABITS) { nav -> HabitEditScreen(app, nav, habitId(name = "no sugar"), null) }
+    @Test fun journal() = shoot("21-journal", Tab.HABITS) { nav -> JournalScreen(app, nav) }
+    @Test fun crt() = shoot("22-crt-matrix", Tab.TODAY, theme = "matrix", crt = true) { nav -> TodayScreen(app, nav) }
 
     @Suppress("UNCHECKED_CAST")
     private fun setTimerState(state: TimerState) {
@@ -123,12 +147,14 @@ class ScreenshotSuite {
         tab: Tab,
         theme: String = "dracula",
         dark: Boolean = true,
+        crt: Boolean = false,
         content: @Composable (androidx.navigation.NavHostController) -> Unit,
     ) {
         val settings = Settings(
             themeName = theme,
             themeMode = if (dark) ThemeMode.DARK else ThemeMode.LIGHT,
             username = DemoData.USERNAME,
+            crtEffect = crt,
         )
         rule.setContent {
             TerminalTheme(settings) {

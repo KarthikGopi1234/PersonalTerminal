@@ -28,3 +28,16 @@
 
 # Glance widget receivers are referenced from the manifest
 -keep class dev.personalterminal.widget.** { *; }
+
+# Glance action callbacks are looked up by class name from the broadcast intent
+-keep class * extends androidx.glance.appwidget.action.ActionCallback { *; }
+-keep class androidx.glance.appwidget.action.** { *; }
+# Background workers / receivers / tile are instantiated reflectively by the framework
+-keep class dev.personalterminal.reminders.** { *; }
+-keep class dev.personalterminal.health.** { *; }
+-keep class dev.personalterminal.automation.** { *; }
+-keep class dev.personalterminal.timer.TimerTileService { *; }
+-keep class * extends androidx.work.ListenableWorker { *; }
+# Health Connect client (uses protobuf + reflection internally)
+-dontwarn androidx.health.connect.**
+-keep class androidx.health.connect.client.impl.** { *; }

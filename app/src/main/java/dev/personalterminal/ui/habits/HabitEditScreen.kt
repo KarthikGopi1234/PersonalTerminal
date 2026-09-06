@@ -53,15 +53,16 @@ import dev.personalterminal.ui.theme.Term
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: Long, routineId: Long?) {
+fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: Long, routineId: Long?, initialName: String? = null) {
     val p = Term.palette
     val scope = rememberCoroutineScope()
     val routines by remember { app.habits.observeRoutines() }.collectAsStateWithLifecycle(initialValue = emptyList())
 
     var loaded by remember { mutableStateOf(habitId == 0L) }
     var original by remember { mutableStateOf<Habit?>(null) }
-    var name by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf(initialName ?: "") }
     var type by remember { mutableStateOf(HabitType.CHECKBOX) }
     var target by remember { mutableIntStateOf(1) }
     var unit by remember { mutableStateOf("") }
@@ -72,11 +73,18 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
     var color by remember { mutableStateOf("green") }
     var notes by remember { mutableStateOf("") }
     var confirmDelete by remember { mutableStateOf(false) }
+    var negative by remember { mutableStateOf(false) }
+    var reminder by remember { mutableIntStateOf(-1) }
+    var focusMin by remember { mutableIntStateOf(0) }
+    var breakMin by remember { mutableIntStateOf(0) }
+    var healthMetric by remember { mutableStateOf("") }
+    val settings by app.prefs.settings.collectAsStateWithLifecycle(initialValue = dev.personalterminal.data.prefs.Settings())
 
     LaunchedEffect(habitId) {
         if (habitId != 0L) app.habits.habit(habitId)?.let { h ->
             original = h; name = h.name; type = h.type; target = h.target; unit = h.unit; schedule = h.schedule
             daysMask = h.daysMask; timesPerWeek = h.timesPerWeek; selectedRoutine = h.routineId; color = h.color; notes = h.notes
+            negative = h.negative; reminder = h.reminderMinutes; focusMin = h.focusMinutes; breakMin = h.breakMinutes; healthMetric = h.healthMetric
         }
         loaded = true
     }
@@ -89,6 +97,10 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
         if (!loaded) { Comment("loading…"); return@Column }
 
         TermTextField(value = name, onValueChange = { name = it }, label = "name", placeholder = "e.g. drink water")
+        if (habitId == 0L) {
+            Text("→ pick from templates", color = p.cyan, style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.clickable { nav.navigate(dev.personalterminal.ui.navigation.Routes.TEMPLATES) }.padding(vertical = 2.dp))
+        }
 
         Column {
             Text("type:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
@@ -97,6 +109,7 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
                 if (it == HabitType.CHECKBOX) target = 1
                 else if (target <= 1) target = if (it == HabitType.TIMER) 25 else 8
                 if (it == HabitType.TIMER) unit = "min"
+                if (it != HabitType.CHECKBOX) negative = false
             }, label = { it.name.lowercase() })
             Comment(
                 when (type) {
@@ -105,6 +118,14 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
                     HabitType.TIMER -> "minutes of focus; use the pomodoro timer to log"
                 },
             )
+            if (type == HabitType.CHECKBOX) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { negative = !negative }.padding(top = 6.dp, bottom = 2.dp)) {
+                    Text(if (negative) "[✓]" else "[ ]", color = if (negative) p.red else p.fgDim, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(8.dp))
+                    Text("avoid-habit (e.g. no sugar)", color = p.fg, style = MaterialTheme.typography.bodyMedium)
+                }
+                if (negative) Comment("every scheduled day counts as kept unless you log a slip; the streak grows on its own")
+            }
         }
 
         if (type != HabitType.CHECKBOX) {
@@ -157,6 +178,61 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
         }
 
         Column {
+            Text("reminder:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 4.dp)) {
+                Chip(label = "off", selected = reminder < 0, color = p.fgDim) { reminder = -1 }
+                listOf(7 * 60, 9 * 60, 12 * 60 + 30, 18 * 60, 21 * 60).forEach { m ->
+                    Chip(label = "%02d:%02d".format(m / 60, m % 60), selected = reminder == m, color = p.yellow) { reminder = m }
+                }
+            }
+            if (reminder >= 0) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                    Text("fine-tune: ", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+                    Stepper(value = reminder / 60, onChange = { reminder = it * 60 + reminder % 60 }, min = 0, max = 23, suffix = "h", color = p.yellow)
+                    Spacer(Modifier.width(8.dp))
+                    Stepper(value = reminder % 60, onChange = { reminder = (reminder / 60) * 60 + it }, min = 0, max = 59, suffix = "m", color = p.yellow)
+                }
+                Comment(
+                    if (settings.hasQuietHours) "muted during quiet hours %02d:%02d–%02d:%02d (settings)".format(settings.quietStartMin / 60, settings.quietStartMin % 60, settings.quietEndMin / 60, settings.quietEndMin % 60)
+                    else "no quiet hours configured",
+                )
+            }
+        }
+
+        if (type == HabitType.TIMER) {
+            Column {
+                Text("focus interval:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 4.dp)) {
+                    Chip(label = "global (${settings.pomodoroFocusMin}/${settings.pomodoroBreakMin})", selected = focusMin == 0, color = p.fgDim) { focusMin = 0; breakMin = 0 }
+                    listOf(15 to 3, 25 to 5, 50 to 10, 90 to 20).forEach { (f, b) ->
+                        Chip(label = "$f/$b", selected = focusMin == f && breakMin == b, color = p.orange) { focusMin = f; breakMin = b }
+                    }
+                }
+                if (focusMin > 0) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                    Text("focus ", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+                    Stepper(value = focusMin, onChange = { focusMin = it }, min = 1, max = 180, suffix = "m", color = p.orange)
+                    Spacer(Modifier.width(10.dp))
+                    Text("break ", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+                    Stepper(value = breakMin, onChange = { breakMin = it }, min = 1, max = 60, suffix = "m", color = p.cyan)
+                }
+                Comment("used when you start the timer from this habit")
+            }
+        }
+
+        if (type != HabitType.CHECKBOX && settings.healthConnect) {
+            Column {
+                Text("health connect:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 4.dp)) {
+                    Chip(label = "none", selected = healthMetric.isBlank(), color = p.fgDim) { healthMetric = "" }
+                    dev.personalterminal.health.HealthMetric.entries.forEach { m ->
+                        Chip(label = m.label, selected = healthMetric == m.id, color = p.green) { healthMetric = m.id; if (unit.isBlank()) unit = m.unitHint }
+                    }
+                }
+                Comment("today's value is filled in automatically from Health Connect")
+            }
+        }
+
+        Column {
             Text("color:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
                 Palettes.colorNames.forEach { c ->
@@ -185,8 +261,12 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
                             name = name.trim(), type = type, target = if (type == HabitType.CHECKBOX) 1 else target.coerceAtLeast(1),
                             unit = unit.trim(), schedule = schedule, daysMask = if (daysMask == 0) 127 else daysMask,
                             timesPerWeek = timesPerWeek, routineId = selectedRoutine, color = color, notes = notes.trim(),
+                            negative = negative && type == HabitType.CHECKBOX, reminderMinutes = reminder,
+                            focusMinutes = if (type == HabitType.TIMER) focusMin else 0, breakMinutes = if (type == HabitType.TIMER) breakMin else 0,
+                            healthMetric = if (type != HabitType.CHECKBOX) healthMetric else "",
                         )
                         app.habits.saveHabit(h)
+                        dev.personalterminal.reminders.ReminderScheduler.reschedule(app)
                         nav.popBackStack()
                     }
                 },

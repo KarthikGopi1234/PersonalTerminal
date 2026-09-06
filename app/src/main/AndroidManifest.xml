@@ -15,12 +15,20 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Optional: Do-Not-Disturb while a focus phase runs (user grants it in system settings) -->
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+    <!-- Health Connect auto-completion (steps / exercise / sleep / mindfulness) -->
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <uses-permission android:name="android.permission.health.READ_EXERCISE" />
+    <uses-permission android:name="android.permission.health.READ_SLEEP" />
+    <uses-permission android:name="android.permission.health.READ_HYDRATION" />
 
     <!-- Lets the timer screen check whether the per-app "Live Updates" settings page exists (Android 16+) -->
     <queries>
         <intent>
             <action android:name="android.settings.APP_NOTIFICATION_PROMOTION_SETTINGS" />
         </intent>
+        <package android:name="com.google.android.apps.healthdata" />
     </queries>
 
     <application
@@ -46,7 +54,39 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Open .ptbak / .ptbakx archives and colour-scheme JSON files handed over by other apps -->
+            <intent-filter tools:ignore="AppLinkUrlError">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-personal-terminal-backup" />
+                <data android:pathPattern=".*\\.ptbak" />
+                <data android:pathPattern=".*\\.ptbakx" />
+            </intent-filter>
+            <!-- Health Connect permission rationale (Android 13-) -->
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
+            <meta-data
+                android:name="health_permissions_rationale"
+                android:value="@string/health_permissions_rationale" />
         </activity>
+
+        <!-- Health Connect permission rationale (Android 14+) -->
+        <activity-alias
+            android:name="ViewPermissionUsageActivity"
+            android:exported="true"
+            android:targetActivity=".MainActivity"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
 
         <!-- Home-screen widget (Glance) -->
         <receiver
@@ -61,6 +101,68 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/habit_widget_info" />
         </receiver>
+        <receiver
+            android:name=".widget.StreakWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_streak_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/streak_widget_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.TimerWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_timer_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/timer_widget_info" />
+        </receiver>
+
+        <!-- "done" button on reminder notifications -->
+        <receiver
+            android:name=".reminders.ReminderActionReceiver"
+            android:exported="false" />
+
+        <!-- Automation (Tasker / MacroDroid / adb): exported broadcast entry point, see docs/AUTOMATION.md -->
+        <receiver
+            android:name=".automation.AutomationReceiver"
+            android:exported="true"
+            tools:ignore="ExportedReceiver">
+            <intent-filter>
+                <action android:name="dev.personalterminal.action.COMPLETE" />
+                <action android:name="dev.personalterminal.action.INCREMENT" />
+                <action android:name="dev.personalterminal.action.SET" />
+                <action android:name="dev.personalterminal.action.SKIP" />
+                <action android:name="dev.personalterminal.action.WEAR" />
+                <action android:name="dev.personalterminal.action.TIMER_START" />
+                <action android:name="dev.personalterminal.action.TIMER_STOP" />
+                <action android:name="dev.personalterminal.action.BACKUP" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Quick Settings tile: start / stop the focus timer from the shade -->
+        <service
+            android:name=".timer.TimerTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_notification"
+            android:label="@string/tile_timer_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="true" />
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
 
         <!-- Pomodoro timer foreground service -->
         <service

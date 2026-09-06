@@ -13,4 +13,26 @@
     <string name="widget_preview_prompt">user@android $ today</string>
     <string name="widget_preview_rows">[✓] meditate\n[ ] read 20 pages\n[ ] water 5/8</string>
     <string name="widget_preview_bar">████░░░░░░ 33%</string>
+    <string name="widget_streak_label">Personal Terminal · status</string>
+    <string name="widget_streak_description">Level, XP bar, shields and your longest streak at a glance.</string>
+    <string name="widget_preview_streak_prompt">user@android $ status</string>
+    <string name="widget_preview_streak_rows">lvl 11  ████████░░ 80%\n⚡ 33 stretch · ⛨ 2</string>
+    <string name="widget_timer_label">Personal Terminal · timer</string>
+    <string name="widget_timer_description">Start, pause or stop the focus timer from your home screen.</string>
+    <string name="widget_preview_timer_prompt">user@android $ timer</string>
+    <string name="widget_preview_timer_rows">25:00 idle\n[▶ start]</string>
+    <string name="notification_channel_reminders">Habit reminders</string>
+    <string name="notification_channel_reminders_desc">Per-habit reminders at the time you chose (silent during quiet hours)</string>
+    <string name="notification_channel_watch">Watch service</string>
+    <string name="notification_channel_watch_desc">Service and maintenance reminders for your watches</string>
+    <string name="tile_timer_label">Focus timer</string>
+    <string name="shortcut_timer_short">timer</string>
+    <string name="shortcut_timer_long">Start a focus session</string>
+    <string name="shortcut_wear_short">wear</string>
+    <string name="shortcut_wear_long">Log today\'s watch</string>
+    <string name="shortcut_add_short">habit add</string>
+    <string name="shortcut_add_long">Create a new habit</string>
+    <string name="shortcut_review_short">review</string>
+    <string name="shortcut_review_long">Weekly review</string>
+    <string name="health_permissions_rationale">Personal Terminal reads steps, exercise, sleep and hydration from Health Connect only to tick off the habits you linked to them. Nothing is uploaded.</string>
 </resources>

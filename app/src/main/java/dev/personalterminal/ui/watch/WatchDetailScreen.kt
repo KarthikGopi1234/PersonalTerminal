@@ -1,5 +1,6 @@
 package dev.personalterminal.ui.watch
 
+import dev.personalterminal.domain.AppClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -36,11 +37,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import dev.personalterminal.PersonalTerminalApp
 import dev.personalterminal.data.db.WearLog
+import dev.personalterminal.data.db.displayName
 import dev.personalterminal.ui.components.Comment
 import dev.personalterminal.ui.components.ContributionHeatmap
 import dev.personalterminal.ui.components.KeyValue
 import dev.personalterminal.ui.components.PromptLine
 import dev.personalterminal.ui.components.TermButton
+import dev.personalterminal.ui.components.TermTextField
 import dev.personalterminal.ui.components.TerminalPanel
 import dev.personalterminal.ui.navigation.Routes
 import dev.personalterminal.ui.theme.Term
@@ -54,8 +57,11 @@ fun WatchDetailScreen(app: PersonalTerminalApp, nav: NavHostController, watchId:
     val scope = rememberCoroutineScope()
     val watch by remember(watchId) { app.watches.observeWatch(watchId) }.collectAsStateWithLifecycle(initialValue = null)
     val logs by remember(watchId) { app.watches.observeWearForWatch(watchId) }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val services by remember(watchId) { app.watches.observeServices(watchId) }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val readings by remember(watchId) { app.watches.observeAccuracy(watchId) }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val straps by remember { app.watches.observeStraps() }.collectAsStateWithLifecycle(initialValue = emptyList())
     val w = watch
-    val today = LocalDate.now()
+    val today = AppClock.today()
 
     // ---- wrist-shot flow: pick a photo, then attach it to today (or a chosen past wear day) ----
     val shot = rememberPhotoPickerState(initialPath = null)
@@ -84,18 +90,19 @@ fun WatchDetailScreen(app: PersonalTerminalApp, nav: NavHostController, watchId:
     Column(Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (w == null) { PromptLine("watch show"); Comment("loading…"); return@Column }
         val color = p.named(w.color)
-        PromptLine("watch show ${w.displayName()}")
+        PromptLine("watch show ${w.displayName}")
 
         Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             WatchThumb(app, w, 120.dp)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(w.displayName(), color = p.fg, style = MaterialTheme.typography.titleLarge)
+                Text(w.displayName, color = p.fg, style = MaterialTheme.typography.titleLarge)
                 if (w.nickname.isNotBlank()) Text("${w.brand} ${w.model}", color = p.fgDim, style = MaterialTheme.typography.bodyMedium)
                 if (w.reference.isNotBlank()) KeyValue("ref", w.reference)
                 if (w.movement.isNotBlank()) KeyValue("movement", w.movement, valueColor = color)
                 w.caseSizeMm?.let { KeyValue("case", "${it.toString().removeSuffix(".0")} mm") }
                 KeyValue("wrist days", "${logs.size}", valueColor = color)
                 logs.firstOrNull()?.let { KeyValue("last worn", LocalDate.ofEpochDay(it.log.day).format(DateTimeFormatter.ofPattern("dd MMM yyyy"))) }
+                straps.firstOrNull { it.watchId == w.id }?.let { KeyValue("on strap", it.name, valueColor = p.cyan) }
             }
         }
         val wornToday = logs.any { it.log.day == today.toEpochDay() }
@@ -148,6 +155,104 @@ fun WatchDetailScreen(app: PersonalTerminalApp, nav: NavHostController, watchId:
         }
 
         if (w.notes.isNotBlank()) TerminalPanel(title = "notes") { Text(w.notes, color = p.fg, style = MaterialTheme.typography.bodyMedium) }
+
+        // ---- purchase / valuation
+        if (w.purchasePrice != null || w.currentValue != null || w.purchaseDay != null) {
+            TerminalPanel(title = "valuation", titleColor = p.yellow) {
+                val cur = w.currency.ifBlank { "" }
+                w.purchaseDay?.let { KeyValue("bought", LocalDate.ofEpochDay(it).format(DateTimeFormatter.ofPattern("dd MMM yyyy"))) }
+                w.purchasePrice?.let { KeyValue("paid", "$cur ${"%,.0f".format(it)}".trim()) }
+                w.currentValue?.let { v ->
+                    val delta = w.purchasePrice?.let { v - it }
+                    KeyValue("current value", "$cur ${"%,.0f".format(v)}".trim() + (delta?.let { d -> "  (${if (d >= 0) "+" else ""}${"%,.0f".format(d)})" } ?: ""), valueColor = if ((delta ?: 0.0) >= 0) p.green else p.red)
+                }
+                w.purchasePrice?.let { paid -> if (logs.isNotEmpty()) KeyValue("cost per wear", "$cur ${"%,.2f".format(paid / logs.size)}".trim(), valueColor = p.cyan) }
+                w.purchaseDay?.let { d -> KeyValue("owned for", "${java.time.temporal.ChronoUnit.DAYS.between(LocalDate.ofEpochDay(d), today)} days") }
+            }
+        }
+
+        // ---- service / maintenance log
+        TerminalPanel(title = "service log", titleColor = p.orange) {
+            var nextDue by remember(services, w) { mutableStateOf<LocalDate?>(null) }
+            LaunchedEffect(services, w) { nextDue = app.watches.nextServiceDue(w) }
+            nextDue?.let { due ->
+                val days = java.time.temporal.ChronoUnit.DAYS.between(today, due)
+                KeyValue("next service", due.format(DateTimeFormatter.ofPattern("MMM yyyy")) + if (days < 0) "  (overdue ${-days}d)" else "  (in ${days}d)", valueColor = if (days < 30) p.red else p.fg)
+            } ?: Comment(if (w.serviceIntervalMonths > 0) "set a purchase date or log a service to get a due date" else "set a service interval in edit to get reminders")
+            services.take(8).forEach { sv ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(LocalDate.ofEpochDay(sv.day).format(DateTimeFormatter.ofPattern("yyyy-MM-dd")), color = p.fgDim, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.width(8.dp))
+                    Text(sv.kind + (sv.cost?.let { "  ${w.currency} ${"%,.0f".format(it)}".trimEnd() } ?: "") + (if (sv.notes.isNotBlank()) " · ${sv.notes}" else ""), color = p.fg, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text(" [x]", color = p.red, style = MaterialTheme.typography.labelSmall, modifier = Modifier.clickable { scope.launch { app.watches.deleteService(sv) } }.padding(4.dp))
+                }
+            }
+            var kind by remember { mutableStateOf("service") }
+            var cost by remember { mutableStateOf("") }
+            var note by remember { mutableStateOf("") }
+            Spacer(Modifier.height(6.dp))
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("service", "battery", "regulation", "strap", "polish", "other").forEach { k ->
+                    Text(if (kind == k) "[$k]" else " $k ", color = if (kind == k) p.orange else p.fgDim, style = MaterialTheme.typography.labelSmall, modifier = Modifier.clickable { kind = k }.padding(2.dp))
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                TermTextField(value = cost, onValueChange = { cost = it.filter { c -> c.isDigit() || c == '.' } }, placeholder = "cost", keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal, modifier = Modifier.weight(0.4f), prompt = "")
+                TermTextField(value = note, onValueChange = { note = it }, placeholder = "note", modifier = Modifier.weight(0.6f), prompt = "", imeAction = androidx.compose.ui.text.input.ImeAction.Done)
+            }
+            Spacer(Modifier.height(4.dp))
+            TermButton("log $kind today", color = p.orange, onClick = {
+                scope.launch {
+                    val next = if (kind == "service" && w.serviceIntervalMonths > 0) today.plusMonths(w.serviceIntervalMonths.toLong()).toEpochDay() else null
+                    app.watches.saveService(dev.personalterminal.data.db.WatchService(watchId = w.id, day = today.toEpochDay(), kind = kind, cost = cost.toDoubleOrNull(), notes = note.trim(), nextDueDay = next))
+                    cost = ""; note = ""
+                    dev.personalterminal.reminders.WatchServiceReminder.check(app)
+                }
+            })
+        }
+
+        // ---- accuracy / drift
+        TerminalPanel(title = "accuracy", titleColor = p.cyan) {
+            val drift = remember(readings) { app.watches.drift(readings) }
+            if (drift.secondsPerDay != null) {
+                KeyValue("drift", "${if (drift.secondsPerDay >= 0) "+" else ""}%.1f s/day".format(drift.secondsPerDay), valueColor = if (kotlin.math.abs(drift.secondsPerDay) <= 6f) p.green else if (kotlin.math.abs(drift.secondsPerDay) <= 15f) p.yellow else p.red)
+                KeyValue("over", "%.1f days · ${drift.readings} readings".format(drift.spanDays))
+                drift.latestOffset?.let { KeyValue("current offset", "${if (it >= 0) "+" else ""}%.0f s".format(it)) }
+                Comment(if (kotlin.math.abs(drift.secondsPerDay) <= 6f) "within COSC spec (−4/+6)" else if (drift.secondsPerDay > 0) "running fast" else "running slow")
+            } else Comment("log the offset vs. an atomic clock (time.is) twice, a day apart, to see the daily rate")
+            if (readings.isNotEmpty()) {
+                Row { Text("offsets ", color = p.fgDim, style = MaterialTheme.typography.bodySmall); Text(dev.personalterminal.ui.components.sparkline(readings.takeLast(20).map { it.offsetSeconds }), color = p.cyan, style = MaterialTheme.typography.bodySmall) }
+            }
+            var offset by remember { mutableStateOf("") }
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                TermTextField(value = offset, onValueChange = { offset = it.filter { c -> c.isDigit() || c == '.' || c == '-' || c == '+' } }, placeholder = "+12 (seconds fast)", keyboardType = androidx.compose.ui.text.input.KeyboardType.Text, modifier = Modifier.weight(1f), prompt = "Δ ")
+                TermButton("log", color = p.cyan, enabled = offset.replace("+", "").toFloatOrNull() != null, onClick = {
+                    scope.launch { app.watches.addReading(dev.personalterminal.data.db.AccuracyReading(watchId = w.id, measuredAt = System.currentTimeMillis(), offsetSeconds = offset.replace("+", "").toFloat())); offset = "" }
+                })
+                if (readings.isNotEmpty()) TermButton("reset", color = p.red, onClick = { scope.launch { app.watches.resetAccuracy(w.id) } })
+            }
+            Comment("reset after you set the watch, then keep logging daily")
+        }
+
+        // ---- straps
+        TerminalPanel(title = "strap", titleColor = p.purple) {
+            val fitted = straps.firstOrNull { it.watchId == w.id }
+            val candidates = straps.filter { it.widthMm == null || w.lugWidthMm == null || it.widthMm == w.lugWidthMm }
+            if (straps.isEmpty()) Comment("no straps in the library yet") else {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(if (fitted == null) "[none]" else " none ", color = if (fitted == null) p.purple else p.fgDim, style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.clickable { fitted?.let { f -> scope.launch { app.watches.fitStrap(f, null) } } }.padding(2.dp))
+                    candidates.forEach { st ->
+                        val sel = st.id == fitted?.id
+                        Text(if (sel) "[${st.name}]" else " ${st.name} ", color = if (sel) p.purple else if (st.watchId != null) p.fgDim.copy(alpha = 0.6f) else p.fgDim, style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.clickable { scope.launch { app.watches.fitStrap(st, w.id) } }.padding(2.dp))
+                    }
+                }
+                Comment("tap to fit · greyed straps are on another watch" + (w.lugWidthMm?.let { " · showing ${it}mm" } ?: ""))
+            }
+            Text("strap library →", color = p.cyan, style = MaterialTheme.typography.labelSmall, modifier = Modifier.clickable { nav.navigate(Routes.STRAPS) }.padding(top = 4.dp))
+        }
 
         TerminalPanel(title = "wrist shots (${logs.count { it.log.photoPath != null }})") {
             val shots = logs.filter { it.log.photoPath != null }

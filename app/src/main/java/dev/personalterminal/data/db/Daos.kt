@@ -54,6 +54,10 @@ interface HabitDao {
     suspend fun getActiveWithLogs(): List<HabitWithLogs>
 
     @Transaction
+    @Query("SELECT * FROM habits ORDER BY position, id")
+    suspend fun getAllWithLogs(): List<HabitWithLogs>
+
+    @Transaction
     @Query("SELECT * FROM habits WHERE id = :id")
     fun observeWithLogs(id: Long): Flow<HabitWithLogs?>
 
@@ -98,6 +102,12 @@ interface HabitLogDao {
 
     @Query("SELECT day, COUNT(*) AS count FROM habit_logs WHERE completed = 1 AND day BETWEEN :from AND :to GROUP BY day")
     fun observeCompletionCounts(from: Long, to: Long): Flow<List<DayCount>>
+
+    @Query("SELECT * FROM habit_logs WHERE day BETWEEN :from AND :to")
+    suspend fun getRange(from: Long, to: Long): List<HabitLog>
+
+    @Query("SELECT * FROM habit_logs WHERE note != '' OR mood > 0 ORDER BY day DESC LIMIT :limit")
+    fun observeJournal(limit: Int): Flow<List<HabitLog>>
 
     @Upsert
     suspend fun upsert(log: HabitLog)
@@ -222,6 +232,12 @@ interface WearLogDao {
     @Query("SELECT * FROM wear_logs WHERE watchId = :watchId AND day = :day ORDER BY createdAt DESC")
     suspend fun getForWatchAndDay(watchId: Long, day: Long): List<WearLog>
 
+    @Query("SELECT COALESCE(MAX(day), -1) FROM wear_logs WHERE watchId = :watchId")
+    suspend fun lastWornDay(watchId: Long): Long
+
+    @Query("SELECT strapId AS watchId, COUNT(*) AS count FROM wear_logs WHERE strapId IS NOT NULL GROUP BY strapId")
+    fun observeStrapCounts(): Flow<List<WatchCount>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(log: WearLog): Long
 
@@ -265,5 +281,119 @@ interface XpDao {
     suspend fun deleteFor(habitId: Long, day: Long, reason: String)
 
     @Query("DELETE FROM xp_events")
+    suspend fun deleteAll()
+}
+
+@Dao
+interface FocusSessionDao {
+    @Query("SELECT * FROM focus_sessions ORDER BY startedAt DESC LIMIT :limit")
+    fun observeRecent(limit: Int): Flow<List<FocusSession>>
+
+    @Query("SELECT * FROM focus_sessions WHERE habitId = :habitId ORDER BY startedAt DESC")
+    fun observeForHabit(habitId: Long): Flow<List<FocusSession>>
+
+    @Query("SELECT day, SUM(minutes) AS count FROM focus_sessions WHERE day BETWEEN :from AND :to GROUP BY day")
+    fun observeMinutesPerDay(from: Long, to: Long): Flow<List<DayCount>>
+
+    @Query("SELECT * FROM focus_sessions")
+    suspend fun getAll(): List<FocusSession>
+
+    @Query("SELECT COALESCE(SUM(minutes), 0) FROM focus_sessions")
+    fun observeTotalMinutes(): Flow<Int>
+
+    @Insert
+    suspend fun insert(session: FocusSession): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(sessions: List<FocusSession>)
+
+    @Delete
+    suspend fun delete(session: FocusSession)
+
+    @Query("DELETE FROM focus_sessions")
+    suspend fun deleteAll()
+}
+
+@Dao
+interface WatchServiceDao {
+    @Query("SELECT * FROM watch_services WHERE watchId = :watchId ORDER BY day DESC")
+    fun observeForWatch(watchId: Long): Flow<List<WatchService>>
+
+    @Query("SELECT * FROM watch_services ORDER BY day DESC")
+    fun observeAll(): Flow<List<WatchService>>
+
+    @Query("SELECT * FROM watch_services")
+    suspend fun getAll(): List<WatchService>
+
+    @Query("SELECT * FROM watch_services WHERE nextDueDay IS NOT NULL AND nextDueDay <= :day ORDER BY nextDueDay")
+    suspend fun dueBy(day: Long): List<WatchService>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(service: WatchService): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(services: List<WatchService>)
+
+    @Update
+    suspend fun update(service: WatchService)
+
+    @Delete
+    suspend fun delete(service: WatchService)
+
+    @Query("DELETE FROM watch_services")
+    suspend fun deleteAll()
+}
+
+@Dao
+interface AccuracyDao {
+    @Query("SELECT * FROM watch_accuracy WHERE watchId = :watchId ORDER BY measuredAt")
+    fun observeForWatch(watchId: Long): Flow<List<AccuracyReading>>
+
+    @Query("SELECT * FROM watch_accuracy")
+    suspend fun getAll(): List<AccuracyReading>
+
+    @Query("SELECT * FROM watch_accuracy WHERE watchId = :watchId ORDER BY measuredAt")
+    suspend fun getForWatch(watchId: Long): List<AccuracyReading>
+
+    @Insert
+    suspend fun insert(reading: AccuracyReading): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(readings: List<AccuracyReading>)
+
+    @Delete
+    suspend fun delete(reading: AccuracyReading)
+
+    @Query("DELETE FROM watch_accuracy WHERE watchId = :watchId")
+    suspend fun deleteForWatch(watchId: Long)
+
+    @Query("DELETE FROM watch_accuracy")
+    suspend fun deleteAll()
+}
+
+@Dao
+interface StrapDao {
+    @Query("SELECT * FROM straps ORDER BY name")
+    fun observeAll(): Flow<List<Strap>>
+
+    @Query("SELECT * FROM straps ORDER BY name")
+    suspend fun getAll(): List<Strap>
+
+    @Query("SELECT * FROM straps WHERE id = :id")
+    suspend fun getById(id: Long): Strap?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(strap: Strap): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(straps: List<Strap>)
+
+    @Update
+    suspend fun update(strap: Strap)
+
+    @Delete
+    suspend fun delete(strap: Strap)
+
+    @Query("DELETE FROM straps")
     suspend fun deleteAll()
 }

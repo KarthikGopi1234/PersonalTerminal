@@ -47,6 +47,8 @@ object DemoData {
         val read = habits.saveHabit(Habit(name = "read", type = HabitType.COUNTER, target = 20, unit = "pages", routineId = evening, color = "yellow", position = 5))
         val journal = habits.saveHabit(Habit(name = "journal", type = HabitType.CHECKBOX, routineId = evening, color = "pink", position = 6))
         val workout = habits.saveHabit(Habit(name = "workout", type = HabitType.CHECKBOX, routineId = null, color = "red", position = 7, schedule = ScheduleType.WEEKLY, timesPerWeek = 3))
+        val noSugar = habits.saveHabit(Habit(name = "no sugar", type = HabitType.CHECKBOX, routineId = null, color = "red", position = 8, negative = true,
+            reminderMinutes = 21 * 60, createdAt = today.minusDays(40).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()))
 
         // ~4 months of history. Each habit has its own "consistency", plus a slump in the middle so the
         // heatmap is not a solid block, and an unbroken run for the last few weeks for the streak counters.
@@ -66,7 +68,26 @@ object DemoData {
             if (did(0.65)) habits.setValue(read, 20 + rnd.nextInt(25), d)
             if (did(0.6)) habits.toggle(journal, d)
             if (d.dayOfWeek.value in setOf(1, 3, 5) && did(0.8)) habits.toggle(workout, d)
+            if (age in 1..39 && !recent && rnd.nextDouble() < 0.12) habits.logSlip(noSugar, true, d)
+            if (age == 30) habits.skip(journal, "travelling", d)
             d = d.plusDays(1)
+        }
+        habits.settleNegativeHabits(today)
+        // Notes & moods on a few recent days so the journal / review have content.
+        habits.annotate(meditate, today.minusDays(1), note = "calm, slept well", mood = 4)
+        habits.annotate(read, today.minusDays(2), note = "finished chapter 7", mood = 5)
+        habits.annotate(focus, today.minusDays(3), note = "shipped the widget fix", mood = 4)
+        habits.annotate(journal, today.minusDays(4), mood = 3)
+        // Focus sessions for the session heatmap (~ last 8 weeks of weekday pomodoros).
+        var sd = today.minusDays(56)
+        while (!sd.isAfter(today)) {
+            if (sd.dayOfWeek.value <= 5 && rnd.nextDouble() < 0.7) {
+                val start = sd.atTime(9 + rnd.nextInt(6), 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                repeat(1 + rnd.nextInt(3)) { k ->
+                    db.focusSessionDao().insert(dev.personalterminal.data.db.FocusSession(habitId = focus, day = sd.toEpochDay(), startedAt = start + k * 1_800_000L, endedAt = start + k * 1_800_000L + 1_500_000L, minutes = 25))
+                }
+            }
+            sd = sd.plusDays(1)
         }
         // Today: a morning that is half done.
         habits.setValue(meditate, 10, today)
@@ -76,10 +97,25 @@ object DemoData {
 
         // Watches + wear log.
         val watches = app.watches
-        val speedy = watches.saveWatch(Watch(brand = "Omega", model = "Speedmaster Professional", nickname = "speedy", reference = "310.30.42.50.01.001", movement = "cal. 3861", caseSizeMm = 42f, color = "orange", photoPath = photo(app, "omega", 0xFF2B2B2B.toInt(), 0xFFE0E0E0.toInt())))
-        val seiko = watches.saveWatch(Watch(brand = "Seiko", model = "SPB143", nickname = "62MAS", movement = "6R35", caseSizeMm = 40.5f, color = "cyan", photoPath = photo(app, "seiko", 0xFF1F3A4A.toInt(), 0xFF8BE9FD.toInt())))
-        val cartier = watches.saveWatch(Watch(brand = "Cartier", model = "Tank Must", movement = "quartz", caseSizeMm = 33.7f, color = "yellow", photoPath = photo(app, "cartier", 0xFF3B3320.toInt(), 0xFFF1FA8C.toInt())))
-        val gshock = watches.saveWatch(Watch(brand = "Casio", model = "GW-M5610", nickname = "square", movement = "tough solar", caseSizeMm = 43.2f, color = "green", photoPath = photo(app, "casio", 0xFF202020.toInt(), 0xFF50FA7B.toInt())))
+        val speedy = watches.saveWatch(Watch(brand = "Omega", model = "Speedmaster Professional", nickname = "speedy", reference = "310.30.42.50.01.001", movement = "cal. 3861", caseSizeMm = 42f, color = "orange", photoPath = photo(app, "omega", 0xFF2B2B2B.toInt(), 0xFFE0E0E0.toInt()),
+            purchasePrice = 9800.0, currentValue = 10400.0, currency = "AUD", purchaseDay = today.minusYears(2).toEpochDay(), lugWidthMm = 20, serviceIntervalMonths = 60))
+        val seiko = watches.saveWatch(Watch(brand = "Seiko", model = "SPB143", nickname = "62MAS", movement = "6R35", caseSizeMm = 40.5f, color = "cyan", photoPath = photo(app, "seiko", 0xFF1F3A4A.toInt(), 0xFF8BE9FD.toInt()),
+            purchasePrice = 1650.0, currentValue = 1500.0, currency = "AUD", purchaseDay = today.minusDays(500).toEpochDay(), lugWidthMm = 20, serviceIntervalMonths = 72))
+        val cartier = watches.saveWatch(Watch(brand = "Cartier", model = "Tank Must", movement = "quartz", caseSizeMm = 33.7f, color = "yellow", photoPath = photo(app, "cartier", 0xFF3B3320.toInt(), 0xFFF1FA8C.toInt()),
+            purchasePrice = 4200.0, currency = "AUD", purchaseDay = today.minusDays(300).toEpochDay(), lugWidthMm = 20))
+        val gshock = watches.saveWatch(Watch(brand = "Casio", model = "GW-M5610", nickname = "square", movement = "tough solar", caseSizeMm = 43.2f, color = "green", photoPath = photo(app, "casio", 0xFF202020.toInt(), 0xFF50FA7B.toInt()),
+            purchasePrice = 210.0, currency = "AUD", purchaseDay = today.minusDays(900).toEpochDay()))
+        // Straps, service log and accuracy readings for the watch tracker screens.
+        val suede = watches.saveStrap(dev.personalterminal.data.db.Strap(name = "brown suede", material = "leather", color = "brown", widthMm = 20, watchId = seiko))
+        watches.saveStrap(dev.personalterminal.data.db.Strap(name = "bond nato", material = "nato", color = "grey/black", widthMm = 20))
+        watches.saveStrap(dev.personalterminal.data.db.Strap(name = "flat link bracelet", material = "bracelet", color = "steel", widthMm = 20, watchId = speedy))
+        watches.saveService(dev.personalterminal.data.db.WatchService(watchId = speedy, day = today.minusDays(400).toEpochDay(), kind = "service", cost = 950.0, notes = "full service, new mainspring", nextDueDay = today.plusDays(1425).toEpochDay()))
+        watches.saveService(dev.personalterminal.data.db.WatchService(watchId = cartier, day = today.minusDays(20).toEpochDay(), kind = "battery", cost = 45.0))
+        watches.saveService(dev.personalterminal.data.db.WatchService(watchId = seiko, day = today.minusDays(90).toEpochDay(), kind = "strap", notes = "fitted brown suede"))
+        listOf(0f, 4.5f, 9f, 13f, 18f, 22.5f).forEachIndexed { i, off ->
+            watches.addReading(dev.personalterminal.data.db.AccuracyReading(watchId = speedy, measuredAt = today.minusDays((5 - i).toLong()).atTime(8, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli(), offsetSeconds = off))
+        }
+        check(suede > 0)
         val rotation = listOf(speedy, seiko, seiko, cartier, speedy, gshock, seiko)
         var w = today.minusDays(45)
         var i = 0

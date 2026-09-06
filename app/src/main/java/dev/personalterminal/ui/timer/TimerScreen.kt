@@ -16,6 +16,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -63,6 +66,7 @@ import dev.personalterminal.ui.theme.Term
 fun TimerScreen(app: PersonalTerminalApp, nav: NavHostController, initialHabitId: Long) {
     val p = Term.palette
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     val state by PomodoroService.state.collectAsStateWithLifecycle()
     val settings by app.prefs.settings.collectAsStateWithLifecycle(initialValue = Settings())
     val habits by remember { app.habits.observeHabits() }.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -77,16 +81,22 @@ fun TimerScreen(app: PersonalTerminalApp, nav: NavHostController, initialHabitId
         ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
     var notifGranted by remember { mutableStateOf(notificationsAllowed()) }
     var liveUpdatesOn by remember { mutableStateOf(PomodoroService.canPostLiveUpdates(ctx)) }
+    var dndAccess by remember { mutableStateOf(dev.personalterminal.timer.FocusDnd.hasAccess(ctx)) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         // Re-check when coming back from system settings.
-        val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) { notifGranted = notificationsAllowed(); liveUpdatesOn = PomodoroService.canPostLiveUpdates(ctx) } }
+        val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) { notifGranted = notificationsAllowed(); liveUpdatesOn = PomodoroService.canPostLiveUpdates(ctx); dndAccess = dev.personalterminal.timer.FocusDnd.hasAccess(ctx) } }
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
+    var stopwatchMode by remember { mutableStateOf(false) }
+    val selected = timerHabits.firstOrNull { it.id == selectedHabit }
+    val focusLen = selected?.focusMinutes?.takeIf { it > 0 } ?: settings.pomodoroFocusMin
+    val breakLen = selected?.breakMinutes?.takeIf { it > 0 } ?: settings.pomodoroBreakMin
     fun startSession() {
         val h = timerHabits.firstOrNull { it.id == selectedHabit }
-        PomodoroService.start(ctx, settings.pomodoroFocusMin, settings.pomodoroBreakMin, settings.pomodoroLongBreakMin, h?.id ?: 0L, h?.name ?: "")
+        if (stopwatchMode) PomodoroService.startStopwatch(ctx, h?.id ?: 0L, h?.name ?: "")
+        else PomodoroService.start(ctx, focusLen, breakLen, settings.pomodoroLongBreakMin, h?.id ?: 0L, h?.name ?: "")
     }
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         notifGranted = granted
@@ -96,18 +106,27 @@ fun TimerScreen(app: PersonalTerminalApp, nav: NavHostController, initialHabitId
         if (notificationsAllowed()) startSession()
         else permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
+
     fun openNotificationSettings() {
         val i = Intent(SysSettings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(SysSettings.EXTRA_APP_PACKAGE, ctx.packageName)
         runCatching { ctx.startActivity(i) }
     }
 
-    val phaseColor = when (state.phase) { Phase.FOCUS -> p.orange; Phase.BREAK, Phase.LONG_BREAK -> p.cyan; Phase.IDLE -> p.green }
+    val phaseColor = when (state.phase) { Phase.FOCUS, Phase.STOPWATCH -> p.orange; Phase.BREAK, Phase.LONG_BREAK -> p.cyan; Phase.IDLE -> p.green }
 
     Column(
         Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        PromptLine("pomodoro", trailing = if (state.cycle > 0) "🍅 ×${state.cycle}" else null)
+        PromptLine(if (state.isStopwatch || (state.phase == Phase.IDLE && stopwatchMode)) "stopwatch" else "pomodoro", trailing = if (state.cycle > 0) "🍅 ×${state.cycle}" else null)
+        if (state.phase == Phase.IDLE) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(if (!stopwatchMode) "[•] countdown" else "[ ] countdown", color = if (!stopwatchMode) p.green else p.fgDim, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clickable { stopwatchMode = false }.padding(4.dp))
+                Text(if (stopwatchMode) "[•] stopwatch" else "[ ] stopwatch", color = if (stopwatchMode) p.green else p.fgDim, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clickable { stopwatchMode = true }.padding(4.dp))
+                Spacer(Modifier.weight(1f))
+                Text("sessions →", color = p.cyan, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clickable { nav.navigate(Routes.SESSIONS) }.padding(4.dp))
+            }
+        }
 
         // ---- big clock ----
         Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
@@ -120,11 +139,11 @@ fun TimerScreen(app: PersonalTerminalApp, nav: NavHostController, initialHabitId
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    if (state.phase == Phase.IDLE) "%02d:00".format(settings.pomodoroFocusMin) else state.clock,
+                    if (state.phase == Phase.IDLE) (if (stopwatchMode) "00:00" else "%02d:00".format(focusLen)) else state.clock,
                     color = p.fg, style = MaterialTheme.typography.displayLarge, fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    when (state.phase) { Phase.IDLE -> "idle"; Phase.FOCUS -> "focus"; Phase.BREAK -> "break"; Phase.LONG_BREAK -> "long break" } +
+                    when (state.phase) { Phase.IDLE -> "idle"; Phase.FOCUS -> "focus"; Phase.BREAK -> "break"; Phase.LONG_BREAK -> "long break"; Phase.STOPWATCH -> "stopwatch" } +
                         (if (state.phase != Phase.IDLE && !state.running) " (paused)" else ""),
                     color = phaseColor, style = MaterialTheme.typography.titleMedium,
                 )
@@ -135,13 +154,13 @@ fun TimerScreen(app: PersonalTerminalApp, nav: NavHostController, initialHabitId
         // ---- controls ----
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             when {
-                state.phase == Phase.IDLE -> TermButton("▶ start focus", filled = true, modifier = Modifier.weight(1f), onClick = { startWithPermission() })
+                state.phase == Phase.IDLE -> TermButton(if (stopwatchMode) "▶ start stopwatch" else "▶ start focus", filled = true, modifier = Modifier.weight(1f), onClick = { startWithPermission() })
                 state.running -> TermButton("‖ pause", modifier = Modifier.weight(1f), color = p.yellow, onClick = { PomodoroService.send(ctx, PomodoroService.ACTION_PAUSE) })
                 else -> TermButton("▶ resume", modifier = Modifier.weight(1f), filled = true, onClick = { PomodoroService.send(ctx, PomodoroService.ACTION_RESUME) })
             }
             if (state.phase != Phase.IDLE) {
-                TermButton("skip »", color = p.cyan, onClick = { PomodoroService.send(ctx, PomodoroService.ACTION_SKIP) })
-                TermButton("■ stop", color = p.red, onClick = { PomodoroService.send(ctx, PomodoroService.ACTION_STOP) })
+                if (!state.isStopwatch) TermButton("skip »", color = p.cyan, onClick = { PomodoroService.send(ctx, PomodoroService.ACTION_SKIP) })
+                TermButton(if (state.isStopwatch) "■ stop & log" else "■ stop", color = p.red, onClick = { PomodoroService.send(ctx, PomodoroService.ACTION_STOP) })
             }
         }
 
@@ -180,7 +199,8 @@ fun TimerScreen(app: PersonalTerminalApp, nav: NavHostController, initialHabitId
                     modifier = Modifier.clickable(enabled = enabled) { selectedHabit = 0L }.padding(vertical = 3.dp), style = MaterialTheme.typography.bodyMedium)
                 timerHabits.forEach { h ->
                     val sel = h.id == selectedHabit
-                    Text((if (sel) "(•) " else "( ) ") + h.name + "  ${h.target}m/day", color = if (sel) p.named(h.color) else p.fgDim,
+                    val interval = if (h.focusMinutes > 0) "  ${h.focusMinutes}/${h.breakMinutes}" else ""
+                    Text((if (sel) "(•) " else "( ) ") + h.name + "  ${h.target}m/day$interval", color = if (sel) p.named(h.color) else p.fgDim,
                         modifier = Modifier.clickable(enabled = enabled) { selectedHabit = h.id }.padding(vertical = 3.dp), style = MaterialTheme.typography.bodyMedium)
                 }
                 if (!enabled) Comment("stop the session to change the target habit")
@@ -188,8 +208,17 @@ fun TimerScreen(app: PersonalTerminalApp, nav: NavHostController, initialHabitId
         }
 
         TerminalPanel(title = "config") {
-            Text("focus ${settings.pomodoroFocusMin}m · break ${settings.pomodoroBreakMin}m · long break ${settings.pomodoroLongBreakMin}m every 4", color = p.fg, style = MaterialTheme.typography.bodyMedium)
-            Comment("completed focus phases add minutes to the selected habit · stopping early credits whole minutes")
+            Text("focus ${focusLen}m · break ${breakLen}m · long break ${settings.pomodoroLongBreakMin}m every 4" + (if (selected?.focusMinutes ?: 0 > 0) "  (per-habit)" else ""), color = p.fg, style = MaterialTheme.typography.bodyMedium)
+            Comment("completed focus phases add minutes to the selected habit · stopping early credits whole minutes · every session lands on the heatmap")
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable {
+                if (!dndAccess) runCatching { ctx.startActivity(dev.personalterminal.timer.FocusDnd.settingsIntent()) }
+                else scope.launch { app.prefs.setDndDuringFocus(!settings.dndDuringFocus) }
+            }.padding(vertical = 2.dp)) {
+                Text(if (settings.dndDuringFocus && dndAccess) "[✓]" else "[ ]", color = if (settings.dndDuringFocus && dndAccess) p.green else p.fgDim, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(8.dp))
+                Text("do-not-disturb during focus" + if (!dndAccess) "  (grant access)" else "", color = p.fg, style = MaterialTheme.typography.bodyMedium)
+            }
             Spacer(Modifier.height(6.dp))
             TermButton("edit in settings", color = p.fgDim, onClick = { nav.navigate(Routes.SETTINGS) })
         }

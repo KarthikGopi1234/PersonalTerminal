@@ -23,8 +23,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        pendingRoute = intent?.getStringExtra(EXTRA_ROUTE)
         val app = PersonalTerminalApp.get(this)
+        pendingRoute = routeFor(intent, app)
         setContent {
             val settings by app.prefs.settings.collectAsStateWithLifecycle(initialValue = Settings())
             TerminalTheme(settings) {
@@ -41,7 +41,18 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        pendingRoute = intent.getStringExtra(EXTRA_ROUTE)
+        pendingRoute = routeFor(intent, PersonalTerminalApp.get(this))
+    }
+
+    /** Explicit route extra, or – for a `.ptbak` file opened from another app – the settings screen with the file staged for import. */
+    private fun routeFor(intent: Intent?, app: PersonalTerminalApp): String? {
+        intent ?: return null
+        intent.getStringExtra(EXTRA_ROUTE)?.let { return it }
+        if (intent.action == Intent.ACTION_VIEW && intent.data != null) {
+            app.pendingImport.value = intent.data
+            return dev.personalterminal.ui.navigation.Routes.SETTINGS
+        }
+        return null
     }
 
     companion object {

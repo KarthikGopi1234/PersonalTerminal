@@ -28,6 +28,9 @@ open class PersonalTerminalApp : Application() {
 
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    /** A backup archive handed to us via ACTION_VIEW, waiting for the user to confirm the restore in settings. */
+    val pendingImport = kotlinx.coroutines.flow.MutableStateFlow<android.net.Uri?>(null)
+
     /** Whether a fresh install gets the starter habits. Tooling (the screenshot suite) seeds its own data instead. */
     protected open val seedStarterHabits: Boolean get() = true
 
@@ -56,6 +59,13 @@ open class PersonalTerminalApp : Application() {
             // Re-arm periodic backup schedule from persisted settings.
             val s = prefs.current()
             DriveSync.schedule(this@PersonalTerminalApp, s.autoBackup && s.driveAccountEmail.isNotBlank(), s.backupIntervalHours)
+            // Close out past days for avoid-habits (they earn XP for every clean day) and re-arm reminders.
+            runCatching { habits.settleNegativeHabits() }
+            runCatching { dev.personalterminal.reminders.ReminderScheduler.reschedule(this@PersonalTerminalApp) }
+            runCatching { dev.personalterminal.reminders.WatchServiceReminder.schedule(this@PersonalTerminalApp) }
+            runCatching { dev.personalterminal.health.HealthSync.schedule(this@PersonalTerminalApp, s.healthConnect) }
+            if (s.healthConnect) runCatching { dev.personalterminal.health.HealthSync.syncNow(this@PersonalTerminalApp) }
+            runCatching { AppShortcuts.publish(this@PersonalTerminalApp) }
         }
 
         // Any data mutation → refresh widget and (if enabled) request a debounced backup.
@@ -92,12 +102,24 @@ open class PersonalTerminalApp : Application() {
                 description = getString(R.string.notification_channel_backup_desc)
             },
         )
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_REMINDERS, getString(R.string.notification_channel_reminders), NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = getString(R.string.notification_channel_reminders_desc)
+            },
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_WATCH, getString(R.string.notification_channel_watch), NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = getString(R.string.notification_channel_watch_desc)
+            },
+        )
     }
 
     companion object {
         const val CHANNEL_TIMER = "timer_v2"
         const val CHANNEL_TIMER_ALERTS = "timer_alerts"
         const val CHANNEL_BACKUP = "backup"
+        const val CHANNEL_REMINDERS = "reminders"
+        const val CHANNEL_WATCH = "watch_service"
 
         fun get(context: Context): PersonalTerminalApp = context.applicationContext as PersonalTerminalApp
     }

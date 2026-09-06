@@ -35,17 +35,23 @@ object Streaks {
         habit: Habit,
         logs: List<HabitLog>,
         shields: List<ShieldUse>,
-        today: LocalDate = LocalDate.now(),
+        today: LocalDate = AppClock.today(),
     ): StreakInfo {
-        val completedDays: Set<Long> = logs.filter { it.completed }.map { it.day }.toSet()
+        val completedDays: Set<Long> = logs.filter { it.completed && !it.skipped }.map { it.day }.toSet()
+        // Skipped days bridge the chain for free (sick, travelling …) – like a shield that isn't spent.
+        val skippedDays: Set<Long> = logs.filter { it.skipped }.map { it.day }.toSet()
         val shieldDays: Set<Long> = shields.map { it.day }.toSet()
         val created = LocalDate.ofEpochDay(minOf(
             habit.createdAt.toLocalDateEpochDay(),
             completedDays.minOrNull() ?: Long.MAX_VALUE,
+            logs.minOfOrNull { it.day } ?: Long.MAX_VALUE,
         ).coerceAtMost(today.toEpochDay()))
 
+        if (habit.negative) {
+            return negative(habit, logs, shieldDays + skippedDays, created, today)
+        }
         if (habit.schedule == ScheduleType.WEEKLY) {
-            return weekly(habit, completedDays, shieldDays, created, today)
+            return weekly(habit, completedDays, shieldDays + skippedDays, created, today)
         }
 
         // ---- current streak: walk backwards from today ----
@@ -60,6 +66,7 @@ object Streaks {
                 when {
                     epoch in completedDays -> current++
                     epoch in shieldDays -> shieldedInCurrent++
+                    epoch in skippedDays -> { /* deliberate skip bridges the chain */ }
                     first -> { /* today not done yet — chain still alive */ }
                     else -> {
                         // chain broken here; this day could be repaired with a shield
@@ -83,7 +90,7 @@ object Streaks {
                 val e = d.toEpochDay()
                 when {
                     e in completedDays -> { run++; if (run > best) best = run }
-                    e in shieldDays -> { /* bridge */ }
+                    e in shieldDays || e in skippedDays -> { /* bridge */ }
                     d == today -> { /* pending */ }
                     else -> run = 0
                 }
@@ -99,6 +106,56 @@ object Streaks {
             shieldedDays = shieldedInCurrent,
             repairableDay = repairable,
         )
+    }
+
+    /**
+     * Avoid-habits ("no sugar"): every scheduled day is kept unless a slip was logged
+     * (`completed = false, value > 0`). The chain therefore grows by itself – today counts as kept
+     * as long as no slip is logged – and only a slip (not bridged by a shield/skip) breaks it.
+     */
+    private fun negative(
+        habit: Habit,
+        logs: List<HabitLog>,
+        bridgeDays: Set<Long>,
+        created: LocalDate,
+        today: LocalDate,
+    ): StreakInfo {
+        val slipDays: Set<Long> = logs.filter { !it.completed && it.value > 0 && !it.skipped }.map { it.day }.toSet()
+        fun kept(d: LocalDate): Boolean? { // true = kept, false = slipped, null = bridged/not scheduled
+            if (!Schedule.isDue(habit, d)) return null
+            val e = d.toEpochDay()
+            return when {
+                e in slipDays && e !in bridgeDays -> false
+                e in bridgeDays -> null
+                else -> true
+            }
+        }
+        var current = 0
+        var shielded = 0
+        var repairable: LocalDate? = null
+        var cursor = today
+        while (!cursor.isBefore(created)) {
+            when (kept(cursor)) {
+                true -> current++
+                null -> if (cursor.toEpochDay() in slipDays) shielded++
+                false -> { repairable = cursor; break }
+            }
+            cursor = cursor.minusDays(1)
+        }
+        if (repairable != null && repairable.isBefore(today.minusDays(7))) repairable = null
+        var best = 0; var run = 0
+        var d = created
+        while (!d.isAfter(today)) {
+            when (kept(d)) {
+                true -> { run++; if (run > best) best = run }
+                null -> {}
+                false -> run = 0
+            }
+            d = d.plusDays(1)
+        }
+        if (current > best) best = current
+        val keptDays = generateSequence(created) { it.plusDays(1) }.takeWhile { !it.isAfter(today) }.count { kept(it) == true }
+        return StreakInfo(current, best, keptDays, shielded, repairable)
     }
 
     private fun weekly(

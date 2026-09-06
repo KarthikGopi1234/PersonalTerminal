@@ -1,5 +1,6 @@
 package dev.personalterminal.ui.watch
 
+import dev.personalterminal.domain.AppClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -40,6 +41,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import dev.personalterminal.PersonalTerminalApp
+import dev.personalterminal.data.db.displayName
 import dev.personalterminal.ui.components.Comment
 import dev.personalterminal.ui.components.PromptLine
 import dev.personalterminal.ui.components.TermButton
@@ -56,7 +58,7 @@ import java.time.format.DateTimeFormatter
 fun WearLogScreen(app: PersonalTerminalApp, nav: NavHostController, epochDay: Long?) {
     val p = Term.palette
     val scope = rememberCoroutineScope()
-    var date by remember { mutableStateOf(epochDay?.let { LocalDate.ofEpochDay(it) } ?: LocalDate.now()) }
+    var date by remember { mutableStateOf(epochDay?.let { LocalDate.ofEpochDay(it) } ?: AppClock.today()) }
     val watches by remember { app.watches.observeWatches() }.collectAsStateWithLifecycle(initialValue = emptyList())
     val existing by remember(date) { app.watches.observeWearForDay(date) }.collectAsStateWithLifecycle(initialValue = emptyList())
     var selected by remember { mutableLongStateOf(0L) }
@@ -68,7 +70,7 @@ fun WearLogScreen(app: PersonalTerminalApp, nav: NavHostController, epochDay: Lo
         PromptLine("wear log", trailing = date.format(DateTimeFormatter.ofPattern("EEE dd MMM")))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("< prev day", color = p.cyan, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clickable { date = date.minusDays(1) }.padding(4.dp))
-            val isToday = date == LocalDate.now()
+            val isToday = date == AppClock.today()
             Text("next day >", color = if (isToday) p.fgDim else p.cyan, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clickable(enabled = !isToday) { date = date.plusDays(1) }.padding(4.dp))
         }
 
@@ -76,7 +78,7 @@ fun WearLogScreen(app: PersonalTerminalApp, nav: NavHostController, epochDay: Lo
             existing.forEach { e ->
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
                     if (e.log.photoPath != null) { AsyncImage(model = app.watches.photoFile(e.log.photoPath), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(40.dp).clip(RoundedCornerShape(4.dp))); Spacer(Modifier.width(8.dp)) }
-                    Text("⌚ ${e.watch.displayName()}", color = p.fg, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("⌚ ${e.watch.displayName}", color = p.fg, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text("[x]", color = p.red, style = MaterialTheme.typography.labelSmall, modifier = Modifier.clickable { scope.launch { app.watches.deleteWear(e.log) } }.padding(4.dp))
                 }
             }
@@ -102,7 +104,7 @@ fun WearLogScreen(app: PersonalTerminalApp, nav: NavHostController, epochDay: Lo
                         ) {
                             WatchThumb(app, w, 56.dp)
                             Spacer(Modifier.height(4.dp))
-                            Text(w.displayName(), color = if (sel) p.fg else p.fgDim, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal)
+                            Text(w.displayName, color = if (sel) p.fg else p.fgDim, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal)
                         }
                     }
                     repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }

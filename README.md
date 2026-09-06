@@ -6,14 +6,15 @@
 
 ## What it does
 
-- **Habits** — checkbox, counter (`5/8 cups`) and timer modes; routines with daily / weekly / custom schedules.
-- **Streaks & shields** — earned streak freezes protect a chain after a missed day.
-- **Pomodoro** — foreground timer with a live countdown notification (Android 16 Live Update / status-bar chip).
-- **Stats** — GitHub-style heatmap, XP and levels.
-- **Widget** — check off habits from the home screen.
-- **Watch tracker** — photograph today's watch (camera, photos or files), keep a collection, see it on the timeline.
-- **Backup** — automatic Google Drive backups, plus local export/import.
-- **Themes** — Dracula, Nord, Solarized, Gruvbox · light & dark · JetBrains Mono everywhere.
+- **Habits** — checkbox, counter (`5/8 cups`), timer and *avoid* modes (`no sugar`: clean days grow the streak, a slip breaks it); routines with daily / weekly / custom schedules; 22 templates; per-habit reminders with quiet hours; skip-with-reason, completion notes and mood.
+- **Streaks & shields** — earned streak freezes protect a chain after a missed day; skips bridge it for free.
+- **Command line** — a real prompt on Today: `done stretch`, `add 2 water`, `timer 25 focus`, `wear speedy`, `skip run -- sick`, `watch next`, `help`.
+- **Focus** — pomodoro with per-habit intervals, stopwatch mode, optional Do-Not-Disturb, session history on its own heatmap, Quick Settings tile, live countdown notification (Android 16 Live Update).
+- **Insights** — GitHub-style heatmap, XP and levels, weekly review as a shareable monospace card, `man achievements`, per-habit heatmaps and cross-habit correlations.
+- **Widgets** — tick habits off from the home screen (today list), plus status and timer widgets; app shortcuts; Tasker / adb intent API; Health Connect auto-completion.
+- **Watch tracker** — photograph today's watch, collection stats (wear share, neglected, cost per wear), service log with reminders, accuracy / drift, strap library, `watch next` rotation suggester, purchase & valuation, CSV export.
+- **Backup** — automatic Google Drive backups (optionally AES-256 encrypted), restore on first launch, local export/import, importers for Loop Habit Tracker and Habitica.
+- **Terminal feel** — Dracula, Nord, Solarized, Gruvbox, Monokai, Catppuccin, Matrix or an imported colour scheme · light & dark · JetBrains Mono / Fira Code / Roboto Mono · CRT shader · tablet split panes · accessibility mode.
 
 ## Screenshots
 
@@ -29,8 +30,21 @@
 |:-:|:-:|:-:|:-:|
 | <img src="screenshots/09-settings.png" width="200" alt="Settings"> | <img src="screenshots/10-theme-nord-light.png" width="200" alt="Nord light theme"> | <img src="screenshots/11-theme-gruvbox.png" width="200" alt="Gruvbox theme"> | <img src="screenshots/12-theme-solarized-light.png" width="200" alt="Solarized light theme"> |
 
-Screenshots are rendered from the real screens with demo data by `./gradlew screenshots` (Robolectric, no device needed);
-re-run it after UI changes and commit the result.
+| Weekly review | `man achievements` | Insights | Templates |
+|:-:|:-:|:-:|:-:|
+| <img src="screenshots/13-review.png" width="200" alt="Weekly review with shareable card"> | <img src="screenshots/14-achievements.png" width="200" alt="Achievements as a man page"> | <img src="screenshots/15-insights.png" width="200" alt="Correlations and per-habit heatmaps"> | <img src="screenshots/16-templates.png" width="200" alt="Habit templates"> |
+
+| Focus sessions | Watch stats | Straps | Habit edit |
+|:-:|:-:|:-:|:-:|
+| <img src="screenshots/17-sessions.png" width="200" alt="Focus session history"> | <img src="screenshots/18-watch-stats.png" width="200" alt="Collection stats and watch next"> | <img src="screenshots/19-straps.png" width="200" alt="Strap library"> | <img src="screenshots/20-habit-edit.png" width="200" alt="Habit edit with reminder and avoid mode"> |
+
+| Journal | CRT · Matrix | | |
+|:-:|:-:|:-:|:-:|
+| <img src="screenshots/21-journal.png" width="200" alt="Journal of notes and moods"> | <img src="screenshots/22-crt-matrix.png" width="200" alt="CRT shader with the Matrix theme"> | | |
+
+Screenshots are rendered from the real screens with demo data by `./gradlew screenshots` (Robolectric, no device needed)
+and double as the golden images for `./gradlew verifyScreenshots`, which CI runs on every push.
+Re-run `screenshots` after an intentional UI change and commit the result.
 
 ## Install
 
@@ -44,8 +58,9 @@ JDK 17 · Android SDK platform 36 · build-tools 35.0.0 (`scripts/bootstrap-env.
 ```bash
 echo "sdk.dir=$ANDROID_HOME" > local.properties
 ./gradlew assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
-./gradlew testDebugUnitTest    # streak / progression / timer tests
-./gradlew screenshots          # regenerate screenshots/ from the UI
+./gradlew testDebugUnitTest    # streak / progression / timer / insights / importer tests
+./gradlew screenshots          # regenerate screenshots/ from the UI (also the goldens)
+./gradlew verifyScreenshots    # golden-image test against screenshots/
 ```
 
 Google Drive sync needs an OAuth *web* client id in `local.properties` as `GOOGLE_WEB_CLIENT_ID=…`
@@ -54,7 +69,7 @@ works normally and the Drive panel shows `not configured`.
 
 ## Release pipeline
 
-Every push to `main` runs tests → lint → build and publishes a GitHub Release. Versions are automatic:
+Every push to `main` runs tests → lint → screenshot goldens → build and publishes a GitHub Release. Versions are automatic:
 
 | | |
 |---|---|
@@ -67,14 +82,19 @@ Bump `app.version` by hand only for feature milestones. Optional secrets: `GOOGL
 `RELEASE_KEYSTORE_BASE64` + `RELEASE_STORE_PASSWORD` / `RELEASE_KEY_ALIAS` / `RELEASE_KEY_PASSWORD`
 (without them the APK is debug-signed — still installable). The debug build is kept as a 14-day workflow artifact.
 
+## Automation
+
+The Today prompt, the widgets and a broadcast intent API share one shell — see
+[docs/AUTOMATION.md](docs/AUTOMATION.md) for the command list and Tasker / `adb` examples.
+
 ## Roadmap
 
-Feature ideas, grouped and sized, live in [docs/ROADMAP.md](docs/ROADMAP.md).
+Feature ideas, grouped and sized, live in [docs/ROADMAP.md](docs/ROADMAP.md) (shipped items are ticked).
 
 ## Stack
 
-Kotlin · Jetpack Compose (Material 3) · Room · DataStore · Glance · CameraX · WorkManager · Credential Manager + Drive REST v3.
+Kotlin · Jetpack Compose (Material 3) · Room · DataStore · Glance · CameraX · WorkManager · Health Connect · Credential Manager + Drive REST v3.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Font: JetBrains Mono ([OFL](licenses/JetBrainsMono-OFL.txt)). Logo assets in `docs/logo/`.
+MIT — see [LICENSE](LICENSE). Fonts: JetBrains Mono, Fira Code, Roboto Mono (all [OFL](licenses/)). Logo assets in `docs/logo/`.

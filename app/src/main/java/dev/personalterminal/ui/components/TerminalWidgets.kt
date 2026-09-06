@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -35,6 +36,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -76,6 +80,10 @@ fun Comment(text: String, modifier: Modifier = Modifier, color: Color = Term.pal
 /** A blinking block cursor ▌ */
 @Composable
 fun Cursor(modifier: Modifier = Modifier, color: Color = Term.palette.cursor) {
+    if (dev.personalterminal.ui.theme.LocalAccessible.current) {
+        Box(modifier.width(9.dp).height(16.dp).background(color)) // no blinking in accessibility mode
+        return
+    }
     val transition = rememberInfiniteTransition(label = "cursor")
     val alpha by transition.animateFloat(
         initialValue = 1f, targetValue = 0f,
@@ -130,7 +138,9 @@ fun BracketCheckbox(checked: Boolean, color: Color, partial: Boolean = false, mo
             withStyle(SpanStyle(color = p.fgDim)) { append("]") }
         },
         style = MaterialTheme.typography.bodyLarge,
-        modifier = modifier,
+        modifier = modifier
+            .then(if (dev.personalterminal.ui.theme.LocalAccessible.current) Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 40.dp) else Modifier)
+            .semantics { stateDescription = if (checked) "done" else if (partial) "in progress" else "not done"; role = androidx.compose.ui.semantics.Role.Checkbox },
     )
 }
 
@@ -180,6 +190,7 @@ fun TermButton(
     filled: Boolean = false,
 ) {
     val p = Term.palette
+    val accessible = dev.personalterminal.ui.theme.LocalAccessible.current
     val shape = RoundedCornerShape(4.dp)
     val bg = if (filled) color else Color.Transparent
     val fg = if (filled) p.bg else color
@@ -188,8 +199,9 @@ fun TermButton(
             .alpha(if (enabled) 1f else 0.4f)
             .background(bg, shape)
             .border(1.dp, color, shape)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .clickable(enabled = enabled, onClick = onClick, role = androidx.compose.ui.semantics.Role.Button)
+            .then(if (accessible) Modifier.defaultMinSize(minHeight = 48.dp) else Modifier)
+            .padding(horizontal = 12.dp, vertical = if (accessible) 12.dp else 8.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(if (filled) label else "[ $label ]", color = fg, style = MaterialTheme.typography.labelLarge, maxLines = 1)
@@ -214,18 +226,20 @@ fun Tag(text: String, color: Color = Term.palette.fgDim, modifier: Modifier = Mo
 fun TermTextField(
     value: String,
     onValueChange: (String) -> Unit,
-    label: String,
+    label: String? = null,
     modifier: Modifier = Modifier,
     placeholder: String = "",
     singleLine: Boolean = true,
     keyboardType: KeyboardType = KeyboardType.Text,
     imeAction: ImeAction = ImeAction.Next,
     visualTransformation: VisualTransformation = VisualTransformation.None,
+    onImeAction: (() -> Unit)? = null,
+    prompt: String = "> ",
 ) {
     val p = Term.palette
     val interaction = remember { MutableInteractionSource() }
     Column(modifier) {
-        Text("$label:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+        if (label != null) Text("$label:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
@@ -234,9 +248,9 @@ fun TermTextField(
                 .border(1.dp, p.border, RoundedCornerShape(4.dp))
                 .padding(horizontal = 10.dp, vertical = 10.dp),
         ) {
-            Text("> ", color = p.green, style = MaterialTheme.typography.bodyLarge)
+            if (prompt.isNotEmpty()) Text(prompt, color = p.green, style = MaterialTheme.typography.bodyLarge)
             Box(Modifier.weight(1f)) {
-                if (value.isEmpty()) Text(placeholder, color = p.fgDim.copy(alpha = 0.6f), style = MaterialTheme.typography.bodyLarge)
+                if (value.isEmpty()) Text(placeholder, color = p.fgDim.copy(alpha = 0.6f), style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 BasicTextField(
                     value = value,
                     onValueChange = onValueChange,
@@ -245,6 +259,9 @@ fun TermTextField(
                     singleLine = singleLine,
                     interactionSource = interaction,
                     keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                        onDone = { onImeAction?.invoke() }, onGo = { onImeAction?.invoke() }, onSearch = { onImeAction?.invoke() }, onSend = { onImeAction?.invoke() },
+                    ),
                     visualTransformation = visualTransformation,
                     modifier = Modifier.fillMaxWidth(),
                 )

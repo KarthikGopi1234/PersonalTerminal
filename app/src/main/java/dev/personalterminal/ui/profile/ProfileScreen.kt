@@ -1,5 +1,6 @@
 package dev.personalterminal.ui.profile
 
+import dev.personalterminal.domain.AppClock
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -40,7 +41,7 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun ProfileScreen(app: PersonalTerminalApp, nav: NavHostController) {
     val p = Term.palette
-    val today = LocalDate.now()
+    val today = AppClock.today()
     val settings by app.prefs.settings.collectAsStateWithLifecycle(initialValue = Settings())
     val summary by remember { app.habits.observeDay(today) }.collectAsStateWithLifecycle(initialValue = null)
     val from = today.minusWeeks(52)
@@ -109,9 +110,24 @@ fun ProfileScreen(app: PersonalTerminalApp, nav: NavHostController) {
             Comment("+${Progression.XP_COMPLETE} per habit · +${Progression.XP_STREAK_WEEK} each 7-day streak · +${Progression.XP_PERFECT_DAY} perfect day")
         }
 
+        val focusTotal by remember { app.habits.observeTotalFocusMinutes() }.collectAsStateWithLifecycle(initialValue = 0)
         TerminalPanel(title = "collection", titleColor = p.cyan) {
             KeyValue("watches", "${watches.size}")
             KeyValue("habits", "${habits.count { !it.archived }} active · ${habits.count { it.archived }} archived")
+            if (focusTotal > 0) KeyValue("focus logged", "${focusTotal / 60}h ${focusTotal % 60}m", valueColor = p.orange)
+        }
+
+        TerminalPanel(title = "insights", titleColor = p.purple) {
+            val newReview = settings.lastReviewDay < dev.personalterminal.domain.Schedule.weekStart(today).toEpochDay()
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TermButton(if (newReview) "review --week ●" else "review --week", color = p.cyan, onClick = { nav.navigate(Routes.REVIEW) }, modifier = Modifier.weight(1f))
+                TermButton("man achievements", color = p.yellow, onClick = { nav.navigate(Routes.ACHIEVEMENTS) }, modifier = Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TermButton("insights", color = p.purple, onClick = { nav.navigate(Routes.INSIGHTS) }, modifier = Modifier.weight(1f))
+                TermButton("journal", color = p.green, onClick = { nav.navigate(Routes.JOURNAL) }, modifier = Modifier.weight(1f))
+            }
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

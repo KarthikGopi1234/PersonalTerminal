@@ -61,6 +61,12 @@ fun WatchEditScreen(app: PersonalTerminalApp, nav: NavHostController, watchId: L
     var caseSize by remember { mutableStateOf("") }
     var color by remember { mutableStateOf("cyan") }
     var notes by remember { mutableStateOf("") }
+    var lugWidth by remember { mutableStateOf("") }
+    var purchasePrice by remember { mutableStateOf("") }
+    var purchaseDate by remember { mutableStateOf("") }
+    var currentValue by remember { mutableStateOf("") }
+    var currency by remember { mutableStateOf("") }
+    var serviceInterval by remember { mutableStateOf("") }
     val photo = rememberPhotoPickerState(initialPath = null, prefix = "watch")
     var confirmDelete by remember { mutableStateOf(false) }
 
@@ -68,6 +74,9 @@ fun WatchEditScreen(app: PersonalTerminalApp, nav: NavHostController, watchId: L
         if (watchId != 0L) app.watches.watch(watchId)?.let { w ->
             original = w; brand = w.brand; model = w.model; nickname = w.nickname; reference = w.reference; movement = w.movement
             caseSize = w.caseSizeMm?.toString()?.removeSuffix(".0") ?: ""; color = w.color; notes = w.notes
+            lugWidth = w.lugWidthMm?.toString() ?: ""; purchasePrice = w.purchasePrice?.let { "%.0f".format(it) } ?: ""
+            purchaseDate = w.purchaseDay?.let { java.time.LocalDate.ofEpochDay(it).toString() } ?: ""; currentValue = w.currentValue?.let { "%.0f".format(it) } ?: ""
+            currency = w.currency; serviceInterval = if (w.serviceIntervalMonths > 0) w.serviceIntervalMonths.toString() else ""
             if (photo.photoPath == null) photo.photoPath = w.photoPath
         }
         loaded = true
@@ -113,6 +122,21 @@ fun WatchEditScreen(app: PersonalTerminalApp, nav: NavHostController, watchId: L
                 }
             }
         }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            TermTextField(value = lugWidth, onValueChange = { lugWidth = it.filter { c -> c.isDigit() }.take(2) }, label = "lug mm", placeholder = "20", keyboardType = KeyboardType.Number, modifier = Modifier.weight(1f))
+            TermTextField(value = serviceInterval, onValueChange = { serviceInterval = it.filter { c -> c.isDigit() }.take(3) }, label = "service every (months)", placeholder = "60", keyboardType = KeyboardType.Number, modifier = Modifier.weight(1f))
+        }
+        TerminalPanel(title = "purchase & valuation", titleColor = p.yellow) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                TermTextField(value = purchaseDate, onValueChange = { purchaseDate = it.filter { c -> c.isDigit() || c == '-' }.take(10) }, label = "bought (yyyy-mm-dd)", placeholder = "2021-06-15", keyboardType = KeyboardType.Number, modifier = Modifier.weight(1.3f))
+                TermTextField(value = currency, onValueChange = { currency = it.uppercase().take(3) }, label = "cur", placeholder = "AUD", modifier = Modifier.weight(0.7f))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                TermTextField(value = purchasePrice, onValueChange = { purchasePrice = it.filter { c -> c.isDigit() || c == '.' } }, label = "paid", placeholder = "1200", keyboardType = KeyboardType.Decimal, modifier = Modifier.weight(1f))
+                TermTextField(value = currentValue, onValueChange = { currentValue = it.filter { c -> c.isDigit() || c == '.' } }, label = "current value", placeholder = "1500", keyboardType = KeyboardType.Decimal, modifier = Modifier.weight(1f))
+            }
+            Comment("drives cost-per-wear, collection value and service reminders")
+        }
         TermTextField(value = notes, onValueChange = { notes = it }, label = "notes", placeholder = "service history, strap, story…", singleLine = false, imeAction = ImeAction.Default)
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -121,6 +145,9 @@ fun WatchEditScreen(app: PersonalTerminalApp, nav: NavHostController, watchId: L
                     val w = (original ?: Watch(brand = "", model = "")).copy(
                         brand = brand.trim(), model = model.trim(), nickname = nickname.trim(), reference = reference.trim(), movement = movement,
                         caseSizeMm = caseSize.toFloatOrNull(), color = color, notes = notes.trim(), photoPath = photo.photoPath,
+                        lugWidthMm = lugWidth.toIntOrNull(), purchasePrice = purchasePrice.toDoubleOrNull(), currentValue = currentValue.toDoubleOrNull(),
+                        purchaseDay = runCatching { java.time.LocalDate.parse(purchaseDate).toEpochDay() }.getOrNull(), currency = currency.trim(),
+                        serviceIntervalMonths = serviceInterval.toIntOrNull() ?: 0,
                     )
                     app.watches.saveWatch(w)
                     nav.popBackStack()

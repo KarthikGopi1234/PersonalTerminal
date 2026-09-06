@@ -3,7 +3,7 @@ package dev.personalterminal.ui.navigation
 object Routes {
     const val TODAY = "today"
     const val HABITS = "habits"
-    const val HABIT_EDIT = "habit/edit?id={id}&routineId={routineId}"
+    const val HABIT_EDIT = "habit/edit?id={id}&routineId={routineId}&name={name}"
     const val HABIT_DETAIL = "habit/{id}"
     const val ROUTINES = "routines"
     const val TIMER = "timer?habitId={habitId}"
@@ -14,8 +14,18 @@ object Routes {
     const val WEAR_LOG = "wear/log?day={day}"
     const val PROFILE = "profile"
     const val SETTINGS = "settings"
+    const val REVIEW = "review"
+    const val ACHIEVEMENTS = "man/achievements"
+    const val INSIGHTS = "insights"
+    const val TEMPLATES = "habit/templates"
+    const val SESSIONS = "timer/sessions"
+    const val STRAPS = "straps"
+    const val WATCH_STATS = "watch/stats"
+    const val IMPORT = "import"
+    const val JOURNAL = "journal"
 
-    fun habitEdit(id: Long = 0, routineId: Long? = null) = "habit/edit?id=$id&routineId=${routineId ?: -1}"
+    fun habitEdit(id: Long = 0, routineId: Long? = null, name: String? = null) =
+        "habit/edit?id=$id&routineId=${routineId ?: -1}" + (name?.let { "&name=${android.net.Uri.encode(it)}" } ?: "")
     fun habitDetail(id: Long) = "habit/$id"
     fun timer(habitId: Long = 0) = "timer?habitId=$habitId"
     fun watchEdit(id: Long = 0) = "watch/edit?id=$id"

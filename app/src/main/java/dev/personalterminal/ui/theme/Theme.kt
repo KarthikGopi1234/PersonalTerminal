@@ -34,6 +34,8 @@ val JetBrainsMono = FontFamily(
 
 val LocalPalette = staticCompositionLocalOf { Palettes.draculaDark }
 val LocalPrompt = staticCompositionLocalOf { "user@android" }
+/** Accessibility pass: larger touch targets, no decorative animation, higher-contrast dim text. */
+val LocalAccessible = staticCompositionLocalOf { false }
 
 /** Convenience accessor: `Term.palette.green` */
 object Term {
@@ -43,9 +45,9 @@ object Term {
         @Composable get() = LocalPrompt.current
 }
 
-fun monoTypography(scale: Float): Typography {
+fun monoTypography(scale: Float, family: FontFamily = JetBrainsMono): Typography {
     fun s(size: Float, weight: FontWeight = FontWeight.Normal, lh: Float = size * 1.45f) = TextStyle(
-        fontFamily = JetBrainsMono, fontWeight = weight, fontSize = (size * scale).sp, lineHeight = (lh * scale).sp,
+        fontFamily = family, fontWeight = weight, fontSize = (size * scale).sp, lineHeight = (lh * scale).sp,
     )
     return Typography(
         displayLarge = s(40f, FontWeight.Bold), displayMedium = s(32f, FontWeight.Bold), displaySmall = s(28f, FontWeight.Bold),
@@ -83,7 +85,7 @@ fun TerminalTheme(settings: Settings, content: @Composable () -> Unit) {
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
-    val palette = Palettes.get(ThemeFamily.fromId(settings.themeName), dark)
+    val palette = Palettes.resolve(settings.themeName, dark, settings.customPaletteJson)
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
@@ -96,10 +98,18 @@ fun TerminalTheme(settings: Settings, content: @Composable () -> Unit) {
             }
         }
     }
-    CompositionLocalProvider(LocalPalette provides palette, LocalPrompt provides settings.prompt) {
-        MaterialTheme(colorScheme = palette.toColorScheme(), typography = monoTypography(settings.fontScale), content = content)
+    val effective = if (settings.accessibilityMode) palette.copy(fgDim = palette.fgDim.mix(palette.fg, 0.35f), border = palette.border.mix(palette.fg, 0.25f)) else palette
+    CompositionLocalProvider(LocalPalette provides effective, LocalPrompt provides settings.prompt, LocalAccessible provides settings.accessibilityMode) {
+        val scale = if (settings.accessibilityMode) settings.fontScale * 1.1f else settings.fontScale
+        MaterialTheme(colorScheme = effective.toColorScheme(), typography = monoTypography(scale, Fonts.family(settings.fontName))) {
+            CrtOverlay(enabled = settings.crtEffect, palette = effective, content = content)
+        }
     }
 }
+
+private fun androidx.compose.ui.graphics.Color.mix(other: androidx.compose.ui.graphics.Color, t: Float) = androidx.compose.ui.graphics.Color(
+    red = red + (other.red - red) * t, green = green + (other.green - green) * t, blue = blue + (other.blue - blue) * t, alpha = 1f,
+)
 
 /** Preview helper. */
 @Composable

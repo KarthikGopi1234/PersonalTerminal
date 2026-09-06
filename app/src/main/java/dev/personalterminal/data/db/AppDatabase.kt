@@ -6,7 +6,9 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
 import androidx.room.withTransaction
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 class Converters {
     @TypeConverter fun habitTypeToString(t: HabitType): String = t.name
@@ -16,8 +18,11 @@ class Converters {
 }
 
 @Database(
-    entities = [Routine::class, Habit::class, HabitLog::class, ShieldUse::class, Watch::class, WearLog::class, XpEvent::class],
-    version = 1,
+    entities = [
+        Routine::class, Habit::class, HabitLog::class, ShieldUse::class, Watch::class, WearLog::class, XpEvent::class,
+        FocusSession::class, WatchService::class, AccuracyReading::class, Strap::class,
+    ],
+    version = 2,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -29,9 +34,17 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun watchDao(): WatchDao
     abstract fun wearLogDao(): WearLogDao
     abstract fun xpDao(): XpDao
+    abstract fun focusSessionDao(): FocusSessionDao
+    abstract fun watchServiceDao(): WatchServiceDao
+    abstract fun accuracyDao(): AccuracyDao
+    abstract fun strapDao(): StrapDao
 
     /** Wipes every table inside one transaction (used when restoring a backup). */
     suspend fun clearAllData() = withTransaction {
+        focusSessionDao().deleteAll()
+        watchServiceDao().deleteAll()
+        accuracyDao().deleteAll()
+        strapDao().deleteAll()
         wearLogDao().deleteAll()
         watchDao().deleteAll()
         shieldDao().deleteAll()
@@ -48,9 +61,56 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun get(context: Context): AppDatabase = INSTANCE ?: synchronized(this) {
             INSTANCE ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, NAME)
+                .addMigrations(MIGRATION_1_2)
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
                 .also { INSTANCE = it }
+        }
+
+        /** 0.2 → 0.3: habit loop + timer sessions + watch tracker tables. Additive only – no data is touched. */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE habits ADD COLUMN negative INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE habits ADD COLUMN reminderMinutes INTEGER NOT NULL DEFAULT -1")
+                db.execSQL("ALTER TABLE habits ADD COLUMN focusMinutes INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE habits ADD COLUMN breakMinutes INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE habits ADD COLUMN healthMetric TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE habit_logs ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE habit_logs ADD COLUMN skipReason TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE habit_logs ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE habit_logs ADD COLUMN mood INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE watches ADD COLUMN purchasePrice REAL")
+                db.execSQL("ALTER TABLE watches ADD COLUMN purchaseDay INTEGER")
+                db.execSQL("ALTER TABLE watches ADD COLUMN currentValue REAL")
+                db.execSQL("ALTER TABLE watches ADD COLUMN currency TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE watches ADD COLUMN lugWidthMm INTEGER")
+                db.execSQL("ALTER TABLE watches ADD COLUMN serviceIntervalMonths INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE wear_logs ADD COLUMN strapId INTEGER")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS focus_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, habitId INTEGER NOT NULL, " +
+                        "day INTEGER NOT NULL, startedAt INTEGER NOT NULL, endedAt INTEGER NOT NULL, minutes INTEGER NOT NULL, " +
+                        "kind TEXT NOT NULL, completed INTEGER NOT NULL)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_focus_sessions_habitId ON focus_sessions (habitId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_focus_sessions_day ON focus_sessions (day)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS watch_services (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, watchId INTEGER NOT NULL, " +
+                        "day INTEGER NOT NULL, kind TEXT NOT NULL, cost REAL, notes TEXT NOT NULL, nextDueDay INTEGER, createdAt INTEGER NOT NULL, " +
+                        "FOREIGN KEY(watchId) REFERENCES watches(id) ON UPDATE NO ACTION ON DELETE CASCADE)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_watch_services_watchId ON watch_services (watchId)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS watch_accuracy (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, watchId INTEGER NOT NULL, " +
+                        "measuredAt INTEGER NOT NULL, offsetSeconds REAL NOT NULL, note TEXT NOT NULL, " +
+                        "FOREIGN KEY(watchId) REFERENCES watches(id) ON UPDATE NO ACTION ON DELETE CASCADE)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_watch_accuracy_watchId ON watch_accuracy (watchId)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS straps (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, name TEXT NOT NULL, material TEXT NOT NULL, " +
+                        "color TEXT NOT NULL, widthMm INTEGER, watchId INTEGER, notes TEXT NOT NULL, createdAt INTEGER NOT NULL)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_straps_watchId ON straps (watchId)")
+            }
         }
     }
 }

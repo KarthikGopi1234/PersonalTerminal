@@ -1,11 +1,13 @@
 package dev.personalterminal.data.repo
 
+import dev.personalterminal.domain.AppClock
 import dev.personalterminal.data.db.AppDatabase
 import dev.personalterminal.data.db.DayCount
 import dev.personalterminal.data.db.Habit
 import dev.personalterminal.data.db.HabitLog
 import dev.personalterminal.data.db.HabitType
 import dev.personalterminal.data.db.HabitWithLogs
+import dev.personalterminal.data.db.FocusSession
 import dev.personalterminal.data.db.Routine
 import dev.personalterminal.data.db.ScheduleType
 import dev.personalterminal.data.db.ShieldUse
@@ -34,6 +36,7 @@ class HabitRepository(private val db: AppDatabase) {
     private val shieldDao = db.shieldDao()
     private val routineDao = db.routineDao()
     private val xpDao = db.xpDao()
+    private val sessionDao = db.focusSessionDao()
 
     /** Emits whenever a mutation happened – lets the widget and other non-Flow consumers refresh. */
     val mutations = MutableStateFlow(0L)
@@ -50,6 +53,14 @@ class HabitRepository(private val db: AppDatabase) {
         logDao.observeCompletionCounts(from.toEpochDay(), to.toEpochDay())
     fun observeLogsRange(from: LocalDate, to: LocalDate): Flow<List<HabitLog>> =
         logDao.observeRange(from.toEpochDay(), to.toEpochDay())
+    fun observeJournal(limit: Int = 30): Flow<List<HabitLog>> = logDao.observeJournal(limit)
+    fun observeFocusSessions(limit: Int = 50): Flow<List<FocusSession>> = sessionDao.observeRecent(limit)
+    fun observeFocusSessionsFor(habitId: Long): Flow<List<FocusSession>> = sessionDao.observeForHabit(habitId)
+    fun observeFocusMinutesPerDay(from: LocalDate, to: LocalDate): Flow<List<DayCount>> =
+        sessionDao.observeMinutesPerDay(from.toEpochDay(), to.toEpochDay())
+    fun observeTotalFocusMinutes(): Flow<Int> = sessionDao.observeTotalMinutes()
+    suspend fun logsInRange(from: LocalDate, to: LocalDate): List<HabitLog> = logDao.getRange(from.toEpochDay(), to.toEpochDay())
+    suspend fun activeWithLogs(): List<HabitWithLogs> = habitDao.getActiveWithLogs()
 
     /** Full day summary (grouped by routine) for [date]. Recomputes whenever anything changes. */
     fun observeDay(date: LocalDate): Flow<DaySummary> =
@@ -94,7 +105,7 @@ class HabitRepository(private val db: AppDatabase) {
         return HabitStatus(hwl.habit, log, streak, due, weekCount)
     }
 
-    suspend fun streakFor(habitId: Long, date: LocalDate = LocalDate.now()): StreakInfo? {
+    suspend fun streakFor(habitId: Long, date: LocalDate = AppClock.today()): StreakInfo? {
         val habit = habitDao.getById(habitId) ?: return null
         return Streaks.compute(habit, logDao.getForHabit(habitId), shieldDao.getForHabit(habitId), date)
     }
@@ -143,38 +154,136 @@ class HabitRepository(private val db: AppDatabase) {
 
     // ------------------------------------------------------------------ logging
 
-    /** Toggle a checkbox habit (or fully complete/un-complete any habit). */
-    suspend fun toggle(habitId: Long, date: LocalDate = LocalDate.now()) {
+    /**
+     * Toggle a checkbox habit (or fully complete/un-complete any habit). For avoid-habits this toggles
+     * the *slip* instead: clean → slipped → clean.
+     */
+    suspend fun toggle(habitId: Long, date: LocalDate = AppClock.today()) {
         val habit = habitDao.getById(habitId) ?: return
+        if (habit.negative) { logSlip(habitId, slipped = !isSlipped(habit, date), date = date); return }
         val epoch = date.toEpochDay()
         val existing = logDao.get(habitId, epoch)
         val nowCompleted = !(existing?.completed ?: false)
         val value = if (nowCompleted) habit.target.coerceAtLeast(1) else 0
-        logDao.upsert(HabitLog(habitId, epoch, value, nowCompleted))
+        logDao.upsert(existing.carry(habitId, epoch, value, nowCompleted))
         afterChange(habit, epoch, existing?.completed == true, nowCompleted, date)
     }
 
     /** Increment/decrement a counter or add minutes to a timer habit. */
-    suspend fun addValue(habitId: Long, delta: Int, date: LocalDate = LocalDate.now()) {
+    suspend fun addValue(habitId: Long, delta: Int, date: LocalDate = AppClock.today()) {
         val habit = habitDao.getById(habitId) ?: return
         val epoch = date.toEpochDay()
         val existing = logDao.get(habitId, epoch)
         val newValue = ((existing?.value ?: 0) + delta).coerceAtLeast(0)
         val completed = newValue >= habit.target.coerceAtLeast(1)
-        if (newValue == 0 && !completed) logDao.delete(habitId, epoch)
-        else logDao.upsert(HabitLog(habitId, epoch, newValue, completed))
+        if (newValue == 0 && !completed && existing.isBare()) logDao.delete(habitId, epoch)
+        else logDao.upsert(existing.carry(habitId, epoch, newValue, completed))
         afterChange(habit, epoch, existing?.completed == true, completed, date)
     }
 
-    suspend fun setValue(habitId: Long, value: Int, date: LocalDate = LocalDate.now()) {
+    suspend fun setValue(habitId: Long, value: Int, date: LocalDate = AppClock.today()) {
         val habit = habitDao.getById(habitId) ?: return
         val epoch = date.toEpochDay()
         val existing = logDao.get(habitId, epoch)
         val v = value.coerceAtLeast(0)
         val completed = if (habit.type == HabitType.CHECKBOX) v > 0 else v >= habit.target.coerceAtLeast(1)
-        if (v == 0) logDao.delete(habitId, epoch) else logDao.upsert(HabitLog(habitId, epoch, v, completed))
+        if (v == 0 && existing.isBare()) logDao.delete(habitId, epoch) else logDao.upsert(existing.carry(habitId, epoch, v, completed))
         afterChange(habit, epoch, existing?.completed == true, completed, date)
     }
+
+    /** Keeps note / mood when the value changes; a new value always clears a skip. */
+    private fun HabitLog?.carry(habitId: Long, epoch: Long, value: Int, completed: Boolean) =
+        HabitLog(habitId, epoch, value, completed, note = this?.note ?: "", mood = this?.mood ?: 0)
+
+    private fun HabitLog?.isBare() = this == null || (note.isBlank() && mood == 0 && !skipped)
+
+    // ------------------------------------------------------------------ skip / note / mood / avoid-habits
+
+    /** Mark [date] as deliberately skipped (bridges the streak without spending a shield). */
+    suspend fun skip(habitId: Long, reason: String, date: LocalDate = AppClock.today()) {
+        val habit = habitDao.getById(habitId) ?: return
+        val epoch = date.toEpochDay()
+        val existing = logDao.get(habitId, epoch)
+        logDao.upsert(HabitLog(habitId, epoch, 0, false, skipped = true, skipReason = reason.trim(), note = existing?.note ?: "", mood = existing?.mood ?: 0))
+        afterChange(habit, epoch, existing?.completed == true, false, date)
+    }
+
+    suspend fun unskip(habitId: Long, date: LocalDate = AppClock.today()) {
+        val habit = habitDao.getById(habitId) ?: return
+        val epoch = date.toEpochDay()
+        val existing = logDao.get(habitId, epoch) ?: return
+        if (!existing.skipped) return
+        if (existing.note.isBlank() && existing.mood == 0) logDao.delete(habitId, epoch)
+        else logDao.upsert(existing.copy(skipped = false, skipReason = ""))
+        afterChange(habit, epoch, false, false, date)
+    }
+
+    /** Attach a completion note and/or mood (1–5, 0 = none) to the day. */
+    suspend fun annotate(habitId: Long, date: LocalDate, note: String? = null, mood: Int? = null) {
+        val epoch = date.toEpochDay()
+        val existing = logDao.get(habitId, epoch) ?: HabitLog(habitId, epoch, 0, false)
+        val updated = existing.copy(note = note?.trim() ?: existing.note, mood = mood?.coerceIn(0, 5) ?: existing.mood, updatedAt = System.currentTimeMillis())
+        if (updated.value == 0 && !updated.completed && !updated.skipped && updated.note.isBlank() && updated.mood == 0) logDao.delete(habitId, epoch)
+        else logDao.upsert(updated)
+        bump()
+    }
+
+    private suspend fun isSlipped(habit: Habit, date: LocalDate): Boolean {
+        val l = logDao.get(habit.id, date.toEpochDay()) ?: return false
+        return !l.completed && l.value > 0 && !l.skipped
+    }
+
+    /** Avoid-habits: record (or clear) a slip for [date]. A slip forfeits the day's XP. */
+    suspend fun logSlip(habitId: Long, slipped: Boolean, date: LocalDate = AppClock.today()) {
+        val habit = habitDao.getById(habitId) ?: return
+        val epoch = date.toEpochDay()
+        val existing = logDao.get(habitId, epoch)
+        val wasKept = existing?.completed == true
+        if (slipped) {
+            logDao.upsert(HabitLog(habitId, epoch, 1, false, note = existing?.note ?: "", mood = existing?.mood ?: 0))
+            afterChange(habit, epoch, wasKept, false, date)
+        } else {
+            if (existing.isBare()) logDao.delete(habitId, epoch) else logDao.upsert(existing!!.copy(value = 0, completed = false))
+            afterChange(habit, epoch, wasKept, false, date)
+        }
+    }
+
+    /**
+     * Closes past days for avoid-habits: every scheduled day up to yesterday without a slip/skip is
+     * written as kept and earns its XP. Idempotent; called at app start and by the daily worker.
+     */
+    suspend fun settleNegativeHabits(today: LocalDate = AppClock.today(), lookbackDays: Long = 60) {
+        val negatives = habitDao.getActive().filter { it.negative }
+        if (negatives.isEmpty()) return
+        var changed = false
+        for (h in negatives) {
+            val logs = logDao.getForHabit(h.id).associateBy { it.day }
+            val created = java.time.Instant.ofEpochMilli(h.createdAt).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+            var d = maxOf(created, today.minusDays(lookbackDays))
+            while (d.isBefore(today)) {
+                if (Schedule.isDue(h, d) && logs[d.toEpochDay()] == null) {
+                    val epoch = d.toEpochDay()
+                    logDao.upsert(HabitLog(h.id, epoch, 0, true))
+                    awardOnce(h.id, epoch, Progression.REASON_COMPLETE, Progression.XP_COMPLETE)
+                    changed = true
+                }
+                d = d.plusDays(1)
+            }
+        }
+        if (changed) bump()
+    }
+
+    // ------------------------------------------------------------------ focus sessions
+
+    /** Records a finished focus / stopwatch session and credits the minutes to the habit (if any). */
+    suspend fun recordSession(habitId: Long, startedAt: Long, endedAt: Long, minutes: Int, kind: String, completed: Boolean) {
+        if (minutes <= 0) return
+        val day = java.time.Instant.ofEpochMilli(startedAt).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+        sessionDao.insert(FocusSession(habitId = habitId, day = day.toEpochDay(), startedAt = startedAt, endedAt = endedAt, minutes = minutes, kind = kind, completed = completed))
+        if (habitId != 0L) addValue(habitId, minutes, day) else bump()
+    }
+
+    suspend fun deleteSession(session: FocusSession) { sessionDao.delete(session); bump() }
 
     private suspend fun afterChange(habit: Habit, epoch: Long, wasCompleted: Boolean, isCompleted: Boolean, date: LocalDate) {
         if (!wasCompleted && isCompleted) {
@@ -208,7 +317,7 @@ class HabitRepository(private val db: AppDatabase) {
 
     /** Spend a shield to bridge the gap on [day] for [habitId]. Returns false when no shield available. */
     suspend fun useShield(habitId: Long, day: LocalDate): Boolean {
-        val summary = daySummary(LocalDate.now())
+        val summary = daySummary(AppClock.today())
         if (summary.shieldsAvailable <= 0) return false
         val inserted = shieldDao.insert(ShieldUse(habitId, day.toEpochDay()))
         bump()

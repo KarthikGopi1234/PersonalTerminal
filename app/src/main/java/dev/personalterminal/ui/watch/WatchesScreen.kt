@@ -1,5 +1,6 @@
 package dev.personalterminal.ui.watch
 
+import dev.personalterminal.domain.AppClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -35,6 +36,7 @@ import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import dev.personalterminal.PersonalTerminalApp
 import dev.personalterminal.data.db.Watch
+import dev.personalterminal.data.db.displayName
 import dev.personalterminal.ui.components.AsciiProgress
 import dev.personalterminal.ui.components.BracketCheckbox
 import dev.personalterminal.ui.components.Comment
@@ -51,7 +53,7 @@ fun WatchesScreen(app: PersonalTerminalApp, nav: NavHostController) {
     val p = Term.palette
     val watches by remember { app.watches.observeWatches() }.collectAsStateWithLifecycle(initialValue = emptyList())
     val counts by remember { app.watches.observeWearCounts() }.collectAsStateWithLifecycle(initialValue = emptyList())
-    val today = LocalDate.now()
+    val today = AppClock.today()
     val wornToday by remember { app.watches.observeWearForDay(today) }.collectAsStateWithLifecycle(initialValue = emptyList())
     val countMap = counts.associate { it.watchId to it.count }
     val maxCount = (counts.maxOfOrNull { it.count } ?: 1).coerceAtLeast(1)
@@ -72,7 +74,7 @@ fun WatchesScreen(app: PersonalTerminalApp, nav: NavHostController) {
                 } else wornToday.forEach { w ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         BracketCheckbox(checked = true, color = p.cyan); Spacer(Modifier.width(8.dp))
-                        Text(w.watch.displayName(), color = p.fg, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(w.watch.displayName, color = p.fg, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         if (w.log.photoPath != null) AsyncImage(model = app.watches.photoFile(w.log.photoPath), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(36.dp).clip(RoundedCornerShape(4.dp)))
                     }
                 }
@@ -82,6 +84,12 @@ fun WatchesScreen(app: PersonalTerminalApp, nav: NavHostController) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TermButton("watch add", onClick = { nav.navigate(Routes.watchEdit()) }, color = p.cyan, modifier = Modifier.weight(1f))
                 TermButton("log wear", onClick = { nav.navigate(Routes.wearLog(today.toEpochDay())) }, filled = true, color = p.cyan, modifier = Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TermButton("watch stats", onClick = { nav.navigate(Routes.WATCH_STATS) }, color = p.green, modifier = Modifier.weight(1f))
+                TermButton("watch next", onClick = { nav.navigate(Routes.WATCH_STATS) }, color = p.yellow, modifier = Modifier.weight(1f))
+                TermButton("straps", onClick = { nav.navigate(Routes.STRAPS) }, color = p.purple, modifier = Modifier.weight(1f))
             }
         }
         if (watches.isEmpty()) item { Comment("your collection is empty · add a watch to start tracking wrist time") }
@@ -94,7 +102,7 @@ fun WatchesScreen(app: PersonalTerminalApp, nav: NavHostController) {
                 WatchThumb(app, w, 56.dp)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(w.displayName(), color = p.fg, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(w.displayName, color = p.fg, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (w.nickname.isNotBlank()) Text("${w.brand} ${w.model}", color = p.fgDim, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 2.dp)) {
                         if (w.reference.isNotBlank()) Tag(w.reference)
@@ -110,7 +118,6 @@ fun WatchesScreen(app: PersonalTerminalApp, nav: NavHostController) {
     }
 }
 
-fun Watch.displayName(): String = nickname.ifBlank { "$brand $model".trim() }
 
 @Composable
 fun WatchThumb(app: PersonalTerminalApp, w: Watch, size: androidx.compose.ui.unit.Dp) {

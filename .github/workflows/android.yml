@@ -15,7 +15,6 @@ on:
     paths-ignore:
       - '**.md'
       - 'docs/**'
-      - 'screenshots/**'
       - 'LICENSE'
   pull_request:
     branches: [ main ]
@@ -96,6 +95,22 @@ jobs:
 
       - name: Lint
         run: ./gradlew lintDebug --console=plain
+
+      # Golden-image test: every screen is rendered with Robolectric and compared pixel-wise
+      # against screenshots/*.png. Fails on layout regressions; ./gradlew screenshots re-bakes
+      # the goldens after an intentional UI change (they are also the README images).
+      - name: Screenshot goldens
+        run: ./gradlew verifyScreenshots --console=plain
+
+      - name: Upload screenshot diffs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshot-diffs-${{ github.run_number }}
+          path: |
+            app/build/screenshots-diff/*
+            app/build/screenshots-actual/*
+          if-no-files-found: ignore
 
       - name: Assemble debug APK (smoke test, not released)
         run: ./gradlew assembleDebug --console=plain

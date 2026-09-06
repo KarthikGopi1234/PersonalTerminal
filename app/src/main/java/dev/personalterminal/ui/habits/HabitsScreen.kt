@@ -1,5 +1,6 @@
 package dev.personalterminal.ui.habits
 
+import dev.personalterminal.domain.AppClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -48,7 +49,7 @@ import java.time.LocalDate
 fun HabitsScreen(app: PersonalTerminalApp, nav: NavHostController) {
     val p = Term.palette
     val scope = rememberCoroutineScope()
-    val summary by remember { app.habits.observeDay(LocalDate.now()) }.collectAsStateWithLifecycle(initialValue = null)
+    val summary by remember { app.habits.observeDay(AppClock.today()) }.collectAsStateWithLifecycle(initialValue = null)
     val allHabits by remember { app.habits.observeHabits() }.collectAsStateWithLifecycle(initialValue = emptyList())
     var showArchived by remember { mutableStateOf(false) }
     val archived = allHabits.filter { it.archived }

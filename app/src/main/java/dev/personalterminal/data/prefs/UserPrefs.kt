@@ -35,8 +35,36 @@ data class Settings(
     val onboarded: Boolean = false,
     val showBanner: Boolean = true,
     val crtEffect: Boolean = false,
+    /** Reminders are muted between these two times (minutes after midnight). Equal values = no quiet hours. */
+    val quietStartMin: Int = 22 * 60,
+    val quietEndMin: Int = 7 * 60,
+    val remindersEnabled: Boolean = true,
+    /** Enable Do-Not-Disturb while a focus phase runs (needs notification-policy access). */
+    val dndDuringFocus: Boolean = false,
+    /** Monospace font: "jetbrains" | "fira" | "roboto" | "system". */
+    val fontName: String = "jetbrains",
+    /** JSON of a user-imported palette (empty = none). Selected when [themeName] == "custom". */
+    val customPaletteJson: String = "",
+    /** Passphrase used to encrypt archives ("" = plain zip). Never leaves the device. */
+    val backupPassphrase: String = "",
+    /** Larger touch targets / reduced motion / high contrast. */
+    val accessibilityMode: Boolean = false,
+    /** Health Connect auto-completion switch. */
+    val healthConnect: Boolean = false,
+    /** Epoch day of the last weekly review the user looked at (for the “new review” hint). */
+    val lastReviewDay: Long = 0L,
+    /** Whether first-launch restore-from-Drive was offered already. */
+    val restoreOffered: Boolean = false,
 ) {
     val prompt: String get() = "$username@$hostname"
+    val hasQuietHours: Boolean get() = quietStartMin != quietEndMin
+
+    /** True when [minuteOfDay] falls inside the quiet-hours window (which may wrap midnight). */
+    fun isQuiet(minuteOfDay: Int): Boolean {
+        if (!hasQuietHours) return false
+        return if (quietStartMin < quietEndMin) minuteOfDay in quietStartMin until quietEndMin
+        else minuteOfDay >= quietStartMin || minuteOfDay < quietEndMin
+    }
 }
 
 class UserPrefs(private val context: Context) {
@@ -58,6 +86,17 @@ class UserPrefs(private val context: Context) {
         val ONBOARDED = booleanPreferencesKey("onboarded")
         val BANNER = booleanPreferencesKey("banner")
         val CRT = booleanPreferencesKey("crt")
+        val QUIET_START = intPreferencesKey("quiet_start")
+        val QUIET_END = intPreferencesKey("quiet_end")
+        val REMINDERS = booleanPreferencesKey("reminders")
+        val DND_FOCUS = booleanPreferencesKey("dnd_focus")
+        val FONT = stringPreferencesKey("font")
+        val CUSTOM_PALETTE = stringPreferencesKey("custom_palette")
+        val BACKUP_PASSPHRASE = stringPreferencesKey("backup_passphrase")
+        val A11Y = booleanPreferencesKey("a11y")
+        val HEALTH = booleanPreferencesKey("health_connect")
+        val LAST_REVIEW = longPreferencesKey("last_review_day")
+        val RESTORE_OFFERED = booleanPreferencesKey("restore_offered")
     }
 
     val settings: Flow<Settings> = context.dataStore.data.map { p ->
@@ -79,6 +118,17 @@ class UserPrefs(private val context: Context) {
             onboarded = p[Keys.ONBOARDED] ?: false,
             showBanner = p[Keys.BANNER] ?: true,
             crtEffect = p[Keys.CRT] ?: false,
+            quietStartMin = p[Keys.QUIET_START] ?: (22 * 60),
+            quietEndMin = p[Keys.QUIET_END] ?: (7 * 60),
+            remindersEnabled = p[Keys.REMINDERS] ?: true,
+            dndDuringFocus = p[Keys.DND_FOCUS] ?: false,
+            fontName = p[Keys.FONT] ?: "jetbrains",
+            customPaletteJson = p[Keys.CUSTOM_PALETTE] ?: "",
+            backupPassphrase = p[Keys.BACKUP_PASSPHRASE] ?: "",
+            accessibilityMode = p[Keys.A11Y] ?: false,
+            healthConnect = p[Keys.HEALTH] ?: false,
+            lastReviewDay = p[Keys.LAST_REVIEW] ?: 0L,
+            restoreOffered = p[Keys.RESTORE_OFFERED] ?: false,
         )
     }
 
@@ -104,4 +154,14 @@ class UserPrefs(private val context: Context) {
     suspend fun setOnboarded(v: Boolean) = context.dataStore.edit { it[Keys.ONBOARDED] = v }
     suspend fun setShowBanner(v: Boolean) = context.dataStore.edit { it[Keys.BANNER] = v }
     suspend fun setCrt(v: Boolean) = context.dataStore.edit { it[Keys.CRT] = v }
+    suspend fun setQuietHours(startMin: Int, endMin: Int) = context.dataStore.edit { it[Keys.QUIET_START] = startMin; it[Keys.QUIET_END] = endMin }
+    suspend fun setRemindersEnabled(v: Boolean) = context.dataStore.edit { it[Keys.REMINDERS] = v }
+    suspend fun setDndDuringFocus(v: Boolean) = context.dataStore.edit { it[Keys.DND_FOCUS] = v }
+    suspend fun setFont(name: String) = context.dataStore.edit { it[Keys.FONT] = name }
+    suspend fun setCustomPalette(json: String) = context.dataStore.edit { it[Keys.CUSTOM_PALETTE] = json }
+    suspend fun setBackupPassphrase(v: String) = context.dataStore.edit { it[Keys.BACKUP_PASSPHRASE] = v }
+    suspend fun setAccessibilityMode(v: Boolean) = context.dataStore.edit { it[Keys.A11Y] = v }
+    suspend fun setHealthConnect(v: Boolean) = context.dataStore.edit { it[Keys.HEALTH] = v }
+    suspend fun setLastReviewDay(day: Long) = context.dataStore.edit { it[Keys.LAST_REVIEW] = day }
+    suspend fun setRestoreOffered(v: Boolean) = context.dataStore.edit { it[Keys.RESTORE_OFFERED] = v }
 }

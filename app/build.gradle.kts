@@ -3,6 +3,7 @@ import java.awt.image.BufferedImage
 import java.io.File
 import java.util.Properties
 import javax.imageio.ImageIO
+import kotlin.math.abs
 
 plugins {
     alias(libs.plugins.android.application)
@@ -126,6 +127,8 @@ android {
         }
     }
 
+    sourceSets.getByName("test").assets.srcDir("$projectDir/schemas")
+
     testOptions {
         // Robolectric renders the real Compose screens on the JVM (used by the screenshot suite).
         unitTests.isIncludeAndroidResources = true
@@ -188,8 +191,11 @@ dependencies {
     implementation(libs.androidx.exifinterface)
     implementation(libs.coil.compose)
 
-    // Background work (auto backup)
+    // Background work (auto backup, reminders, Health Connect sync)
     implementation(libs.androidx.work.runtime.ktx)
+
+    // Health Connect (auto-completion of step / exercise / sleep / hydration habits)
+    implementation(libs.androidx.health.connect)
 
     // Google sign-in + Drive
     implementation(libs.androidx.credentials)
@@ -213,6 +219,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
 
     // Tests (Robolectric + Compose test rule power the JVM screenshot suite; not shipped in the APK)
+    testImplementation(libs.org.json) // real org.json for plain JVM tests (android.jar only has stubs)
+    testImplementation(libs.androidx.room.testing) // MigrationTestHelper against app/schemas
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.junit)
@@ -231,7 +239,56 @@ dependencies {
  * The suite lives in app/src/test/java/dev/personalterminal/screenshots and is excluded from the
  * normal unit-test run (it is documentation, not a test).
  */
-val wantsScreenshots: Boolean = gradle.startParameter.taskNames.any { it.endsWith("screenshots") }
+val wantsScreenshots: Boolean = gradle.startParameter.taskNames.any { it.endsWith("screenshots") || it.endsWith("verifyScreenshots") }
+val verifyingScreenshots: Boolean = gradle.startParameter.taskNames.any { it.endsWith("verifyScreenshots") }
+
+/**
+ * Golden-image test: renders every screen into build/screenshots-actual and compares each PNG
+ * with the committed golden in `screenshots/`. A screen fails when more than
+ * `screenshots.tolerance` (default 1.5 %) of its pixels differ by a noticeable amount – enough
+ * headroom for anti-aliasing differences between JDKs, tight enough to catch layout regressions.
+ * Diff images (magenta = changed pixels) land in build/screenshots-diff for the CI artifact.
+ *   ./gradlew verifyScreenshots            # CI
+ *   ./gradlew screenshots                  # accept the new look (rewrites the goldens)
+ */
+tasks.register("verifyScreenshots") {
+    group = "verification"
+    description = "Compares freshly rendered screens against the goldens in screenshots/."
+    dependsOn("testDebugUnitTest")
+    val goldenDir = rootProject.file("screenshots")
+    val actualDir = layout.buildDirectory.dir("screenshots-actual").get().asFile
+    val diffDir = layout.buildDirectory.dir("screenshots-diff").get().asFile
+    val tolerance = (providers.gradleProperty("screenshots.tolerance").orNull ?: "1.5").toDouble()
+    doLast {
+        diffDir.mkdirs()
+        val failures = mutableListOf<String>()
+        val goldens = goldenDir.listFiles { f -> f.extension == "png" && f.name != "hero.png" }.orEmpty().sortedBy { it.name }
+        if (goldens.isEmpty()) throw GradleException("no goldens in ${goldenDir} – run ./gradlew screenshots first")
+        goldens.forEach { golden ->
+            val actual = File(actualDir, golden.name)
+            if (!actual.exists()) { failures += "${golden.name}: not rendered"; return@forEach }
+            val a = ImageIO.read(golden); val b = ImageIO.read(actual)
+            if (a.width != b.width || a.height != b.height) { failures += "${golden.name}: size ${a.width}x${a.height} vs ${b.width}x${b.height}"; return@forEach }
+            val diff = BufferedImage(a.width, a.height, BufferedImage.TYPE_INT_ARGB)
+            var changed = 0L
+            for (y in 0 until a.height) for (x in 0 until a.width) {
+                val pa = a.getRGB(x, y); val pb = b.getRGB(x, y)
+                val d = maxOf(
+                    abs(((pa shr 16) and 255) - ((pb shr 16) and 255)),
+                    abs(((pa shr 8) and 255) - ((pb shr 8) and 255)),
+                    abs((pa and 255) - (pb and 255)),
+                )
+                if (d > 24) { changed++; diff.setRGB(x, y, 0xFFFF00FF.toInt()) } else diff.setRGB(x, y, (pa and 0x00FFFFFF) or 0x40000000)
+            }
+            val pct = changed * 100.0 / (a.width.toLong() * a.height)
+            val verdict = if (pct > tolerance) "FAIL" else "ok  "
+            println("screenshot $verdict ${golden.name}: %.2f%% pixels changed (tolerance %.1f%%)".format(pct, tolerance))
+            if (pct > tolerance) { failures += "${golden.name}: %.2f%% changed".format(pct); ImageIO.write(diff, "png", File(diffDir, golden.name)) }
+        }
+        if (failures.isNotEmpty()) throw GradleException("screenshot goldens differ:\n  " + failures.joinToString("\n  ") + "\nRun ./gradlew screenshots to accept, diffs in ${diffDir}")
+    }
+}
+
 tasks.register("screenshots") {
     group = "documentation"
     description = "Renders the app screens into screenshots/ (Robolectric, no device needed)."
@@ -265,7 +322,7 @@ tasks.register("screenshots") {
 tasks.withType<Test>().configureEach {
     if (name != "testDebugUnitTest") return@configureEach
     if (wantsScreenshots) {
-        val dir = rootProject.file("screenshots")
+        val dir = if (verifyingScreenshots) layout.buildDirectory.dir("screenshots-actual").get().asFile else rootProject.file("screenshots")
         systemProperty("screenshots.dir", dir.absolutePath)
         filter.includeTestsMatching("dev.personalterminal.screenshots.*")
         outputs.upToDateWhen { false }

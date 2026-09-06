@@ -1,5 +1,6 @@
 package dev.personalterminal.ui.timeline
 
+import dev.personalterminal.domain.AppClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -55,7 +56,7 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun TimelineScreen(app: PersonalTerminalApp, nav: NavHostController) {
     val p = Term.palette
-    val today = LocalDate.now()
+    val today = AppClock.today()
     var month by remember { mutableStateOf(YearMonth.from(today)) }
     val from = month.atDay(1)
     val to = month.atEndOfMonth()

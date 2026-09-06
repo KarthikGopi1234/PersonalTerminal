@@ -1,5 +1,6 @@
 package dev.personalterminal.ui.components
 
+import dev.personalterminal.domain.AppClock
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -33,7 +34,7 @@ fun ContributionHeatmap(
     values: Map<Long, Float>,
     weeks: Int,
     modifier: Modifier = Modifier,
-    end: LocalDate = LocalDate.now(),
+    end: LocalDate = AppClock.today(),
     color: Color = Term.palette.green,
     onDayClick: ((LocalDate) -> Unit)? = null,
 ) {

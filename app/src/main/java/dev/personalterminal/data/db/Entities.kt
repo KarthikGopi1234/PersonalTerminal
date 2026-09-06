@@ -1,5 +1,6 @@
 package dev.personalterminal.data.db
 
+import dev.personalterminal.domain.AppClock
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
@@ -24,7 +25,7 @@ data class Routine(
     val name: String,
     val icon: String = ">",
     val position: Int = 0,
-    val createdAt: Long = System.currentTimeMillis(),
+    val createdAt: Long = AppClock.clock.millis(),
 )
 
 @Serializable
@@ -56,9 +57,22 @@ data class Habit(
     val color: String = "green",
     val position: Int = 0,
     val archived: Boolean = false,
-    val createdAt: Long = System.currentTimeMillis(),
+    val createdAt: Long = AppClock.clock.millis(),
     val notes: String = "",
+    /** "Avoid" habit (e.g. no sugar): every scheduled day counts as kept unless a slip is logged. */
+    @ColumnInfo(defaultValue = "0") val negative: Boolean = false,
+    /** Reminder time as minutes after local midnight; -1 = no reminder. */
+    @ColumnInfo(defaultValue = "-1") val reminderMinutes: Int = -1,
+    /** Timer habits: per-habit focus / break length in minutes (0 = use the global pomodoro settings). */
+    @ColumnInfo(defaultValue = "0") val focusMinutes: Int = 0,
+    @ColumnInfo(defaultValue = "0") val breakMinutes: Int = 0,
+    /** Health Connect metric that auto-fills this habit ("" = none). See [dev.personalterminal.health.HealthMetric]. */
+    @ColumnInfo(defaultValue = "''") val healthMetric: String = "",
 )
+
+/** Reminder time as a LocalTime, or null when no reminder is set. */
+val Habit.reminderTime: java.time.LocalTime?
+    get() = if (reminderMinutes < 0) null else java.time.LocalTime.of(reminderMinutes / 60 % 24, reminderMinutes % 60)
 
 /** One row per habit per day. `value` is count for counters, minutes for timers, 1/0 for checkbox. */
 @Serializable
@@ -81,7 +95,14 @@ data class HabitLog(
     val day: Long,
     val value: Int = 0,
     val completed: Boolean = false,
-    val updatedAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = AppClock.clock.millis(),
+    /** Day deliberately skipped (sick, travelling …) – neither counts nor breaks the streak. */
+    @ColumnInfo(defaultValue = "0") val skipped: Boolean = false,
+    @ColumnInfo(defaultValue = "''") val skipReason: String = "",
+    /** Free-text completion note ("felt great", "only 10 pages"). */
+    @ColumnInfo(defaultValue = "''") val note: String = "",
+    /** Mood 1 (awful) … 5 (great); 0 = not recorded. */
+    @ColumnInfo(defaultValue = "0") val mood: Int = 0,
 )
 
 /** A streak shield that was consumed to bridge a missed day. */
@@ -101,7 +122,7 @@ data class HabitLog(
 data class ShieldUse(
     val habitId: Long,
     val day: Long,
-    val usedAt: Long = System.currentTimeMillis(),
+    val usedAt: Long = AppClock.clock.millis(),
 )
 
 /** A watch the user owns. */
@@ -120,8 +141,19 @@ data class Watch(
     val photoPath: String? = null,
     val notes: String = "",
     val archived: Boolean = false,
-    val createdAt: Long = System.currentTimeMillis(),
+    val createdAt: Long = AppClock.clock.millis(),
+    val purchasePrice: Double? = null,
+    /** Epoch day of purchase. */
+    val purchaseDay: Long? = null,
+    /** Latest estimated value (same currency as [purchasePrice]). */
+    val currentValue: Double? = null,
+    @ColumnInfo(defaultValue = "''") val currency: String = "",
+    val lugWidthMm: Int? = null,
+    /** Recommended service interval in months (0 = unknown / not tracked). */
+    @ColumnInfo(defaultValue = "0") val serviceIntervalMonths: Int = 0,
 )
+
+val Watch.displayName: String get() = nickname.ifBlank { "$brand $model".trim() }
 
 /** Which watch was worn on which day (plus optional wrist-shot). */
 @Serializable
@@ -143,7 +175,9 @@ data class WearLog(
     val day: Long,
     val photoPath: String? = null,
     val note: String = "",
-    val createdAt: Long = System.currentTimeMillis(),
+    val createdAt: Long = AppClock.clock.millis(),
+    /** Strap the watch was on that day (see [Strap]); null = unknown / default. */
+    val strapId: Long? = null,
 )
 
 /** Persisted XP ledger — one row per reward so XP can be recomputed / audited. */
@@ -155,5 +189,82 @@ data class XpEvent(
     val amount: Int,
     val reason: String,
     @ColumnInfo(defaultValue = "0") val habitId: Long = 0,
-    val createdAt: Long = System.currentTimeMillis(),
+    val createdAt: Long = AppClock.clock.millis(),
+)
+
+/** One focus (pomodoro) or stopwatch session – feeds the session heatmap and per-habit history. */
+@Serializable
+@Entity(tableName = "focus_sessions", indices = [Index("habitId"), Index("day")])
+data class FocusSession(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    /** 0 = free session (not bound to a habit). */
+    val habitId: Long = 0,
+    /** Epoch day the session started on. */
+    val day: Long,
+    val startedAt: Long,
+    val endedAt: Long,
+    /** Whole minutes of focus credited. */
+    val minutes: Int,
+    /** "focus" (countdown) or "stopwatch". */
+    val kind: String = KIND_FOCUS,
+    /** False when the phase was stopped/skipped before it finished. */
+    val completed: Boolean = true,
+) {
+    companion object {
+        const val KIND_FOCUS = "focus"
+        const val KIND_STOPWATCH = "stopwatch"
+    }
+}
+
+/** Service / maintenance entry for a watch (full service, battery, regulation, strap change …). */
+@Serializable
+@Entity(
+    tableName = "watch_services",
+    foreignKeys = [ForeignKey(entity = Watch::class, parentColumns = ["id"], childColumns = ["watchId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("watchId")],
+)
+data class WatchService(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val watchId: Long,
+    val day: Long,
+    /** service | battery | regulation | strap | polish | other */
+    val kind: String = "service",
+    val cost: Double? = null,
+    val notes: String = "",
+    /** Epoch day the next service is due (drives reminders); null = none. */
+    val nextDueDay: Long? = null,
+    val createdAt: Long = AppClock.clock.millis(),
+)
+
+/** One timekeeping measurement: how many seconds the watch is off a reference clock. */
+@Serializable
+@Entity(
+    tableName = "watch_accuracy",
+    foreignKeys = [ForeignKey(entity = Watch::class, parentColumns = ["id"], childColumns = ["watchId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("watchId")],
+)
+data class AccuracyReading(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val watchId: Long,
+    /** Epoch millis of the measurement. */
+    val measuredAt: Long,
+    /** Watch time minus reference time in seconds (+ = running fast). */
+    val offsetSeconds: Float,
+    val note: String = "",
+)
+
+/** A strap / bracelet in the collection; optionally fitted to a watch right now. */
+@Serializable
+@Entity(tableName = "straps", indices = [Index("watchId")])
+data class Strap(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    /** leather | nato | rubber | bracelet | sailcloth | other */
+    val material: String = "",
+    val color: String = "",
+    val widthMm: Int? = null,
+    /** Watch this strap is currently fitted to (null = in the drawer). */
+    val watchId: Long? = null,
+    val notes: String = "",
+    val createdAt: Long = AppClock.clock.millis(),
 )

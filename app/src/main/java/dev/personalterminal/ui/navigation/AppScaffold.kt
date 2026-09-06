@@ -23,6 +23,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.statusBars
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -37,6 +42,15 @@ import dev.personalterminal.ui.boot.BootScreen
 import dev.personalterminal.ui.habits.HabitDetailScreen
 import dev.personalterminal.ui.habits.HabitEditScreen
 import dev.personalterminal.ui.habits.HabitsScreen
+import dev.personalterminal.ui.habits.TemplatesScreen
+import dev.personalterminal.ui.habits.JournalScreen
+import dev.personalterminal.ui.insights.ReviewScreen
+import dev.personalterminal.ui.insights.AchievementsScreen
+import dev.personalterminal.ui.insights.InsightsScreen
+import dev.personalterminal.ui.timer.SessionsScreen
+import dev.personalterminal.ui.watch.StrapsScreen
+import dev.personalterminal.ui.watch.WatchStatsScreen
+import dev.personalterminal.ui.settings.ImportScreen
 import dev.personalterminal.ui.profile.ProfileScreen
 import dev.personalterminal.ui.routines.RoutinesScreen
 import dev.personalterminal.ui.settings.SettingsScreen
@@ -70,13 +84,25 @@ fun AppScaffold(app: PersonalTerminalApp, settings: Settings, startRoute: String
     val currentRoute = backStack?.destination?.route
     val currentTab = Tab.entries.firstOrNull { t -> currentRoute?.substringBefore("?") == t.route.substringBefore("?") }
 
+    // Tablets / landscape phones / unfolded foldables: tmux-style split. The left pane keeps
+    // today's list permanently in view; the right pane hosts everything else.
+    val config = LocalConfiguration.current
+    val wide = config.screenWidthDp >= 840
+    val expanded = config.screenWidthDp >= 600
+
     Scaffold(
         containerColor = p.bg,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        bottomBar = { StatusLine(nav, currentTab, settings) },
+        bottomBar = { if (!expanded) StatusLine(nav, currentTab, settings) },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            NavHost(navController = nav, startDestination = Routes.TODAY) {
+        Row(Modifier.fillMaxSize().padding(padding)) {
+            if (expanded) SideRail(nav, currentTab, settings)
+            if (wide) {
+                Box(Modifier.weight(0.42f).fillMaxHeight()) { TodayScreen(app, nav) }
+                Box(Modifier.width(1.dp).fillMaxHeight().background(p.border))
+            }
+            Box(Modifier.weight(1f).fillMaxHeight()) {
+            NavHost(navController = nav, startDestination = if (wide) Routes.HABITS else Routes.TODAY) {
                 composable(Routes.TODAY) { TodayScreen(app, nav) }
                 composable(Routes.HABITS) { HabitsScreen(app, nav) }
                 composable(
@@ -84,12 +110,22 @@ fun AppScaffold(app: PersonalTerminalApp, settings: Settings, startRoute: String
                     arguments = listOf(
                         navArgument("id") { type = NavType.LongType; defaultValue = 0L },
                         navArgument("routineId") { type = NavType.LongType; defaultValue = -1L },
+                        navArgument("name") { type = NavType.StringType; nullable = true; defaultValue = null },
                     ),
                 ) {
                     val id = it.arguments?.getLong("id") ?: 0L
                     val rid = it.arguments?.getLong("routineId") ?: -1L
-                    HabitEditScreen(app, nav, habitId = id, routineId = rid.takeIf { r -> r >= 0 })
+                    HabitEditScreen(app, nav, habitId = id, routineId = rid.takeIf { r -> r >= 0 }, initialName = it.arguments?.getString("name"))
                 }
+                composable(Routes.TEMPLATES) { TemplatesScreen(app, nav) }
+                composable(Routes.REVIEW) { ReviewScreen(app, nav) }
+                composable(Routes.ACHIEVEMENTS) { AchievementsScreen(app, nav) }
+                composable(Routes.INSIGHTS) { InsightsScreen(app, nav) }
+                composable(Routes.SESSIONS) { SessionsScreen(app, nav) }
+                composable(Routes.STRAPS) { StrapsScreen(app, nav) }
+                composable(Routes.WATCH_STATS) { WatchStatsScreen(app, nav) }
+                composable(Routes.IMPORT) { ImportScreen(app, nav) }
+                composable(Routes.JOURNAL) { JournalScreen(app, nav) }
                 composable(Routes.HABIT_DETAIL, arguments = listOf(navArgument("id") { type = NavType.LongType })) {
                     HabitDetailScreen(app, nav, it.arguments?.getLong("id") ?: 0L)
                 }
@@ -111,8 +147,35 @@ fun AppScaffold(app: PersonalTerminalApp, settings: Settings, startRoute: String
                 composable(Routes.PROFILE) { ProfileScreen(app, nav) }
                 composable(Routes.SETTINGS) { SettingsScreen(app, nav) }
             }
+            }
         }
     }
+}
+
+/** Vertical tab strip for wide layouts (`[0:today]` … stacked on the left, like a tmux pane list). */
+@Composable
+private fun SideRail(nav: NavHostController, current: Tab?, settings: Settings) {
+    val p = Term.palette
+    Column(
+        Modifier.fillMaxHeight().width(112.dp).background(p.bgAlt).windowInsetsPadding(WindowInsets.statusBars).padding(vertical = 12.dp, horizontal = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(settings.prompt, color = p.green, style = MaterialTheme.typography.labelSmall, maxLines = 1, modifier = Modifier.padding(horizontal = 4.dp))
+        Spacer(Modifier.height(8.dp))
+        Tab.entries.forEach { tab ->
+            val selected = tab == current
+            Text(
+                text = if (selected) "[${tab.index}:${tab.label}]" else " ${tab.index}:${tab.label} ",
+                color = if (selected) p.green else p.fgDim,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.fillMaxWidth().then(if (selected) Modifier.background(p.bgHighlight) else Modifier).clickable { nav.switchTab(tab) }.padding(horizontal = 4.dp, vertical = 8.dp),
+            )
+        }
+        Spacer(Modifier.weight(1f))
+        Text("⚙ settings", color = p.fgDim, style = MaterialTheme.typography.labelSmall, modifier = Modifier.clickable { nav.navigate(Routes.SETTINGS) }.padding(4.dp))
+    }
+    Box(Modifier.width(1.dp).fillMaxHeight().background(p.border))
 }
 
 /** tmux-like status bar: `[0:today] 1:habits 2:timer 3:watch 4:profile        lvl 3 ` */

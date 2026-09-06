@@ -51,6 +51,20 @@ enum class ThemeFamily(val id: String, val label: String) {
 object Palettes {
     val colorNames = listOf("green", "cyan", "blue", "purple", "pink", "red", "orange", "yellow")
 
+    /** Theme id used in settings for an imported colour scheme. */
+    const val CUSTOM_ID = "custom"
+
+    /**
+     * Resolves the palette for [themeId]: a built-in family, or [CUSTOM_ID] backed by the user's
+     * imported scheme (falls back to Dracula when the JSON is missing or invalid).
+     */
+    fun resolve(themeId: String, dark: Boolean, customJson: String): TerminalPalette {
+        if (themeId == CUSTOM_ID) {
+            CustomPalette.parse(customJson)?.let { c -> return if (dark) c.dark else c.light }
+        }
+        return get(ThemeFamily.fromId(themeId), dark)
+    }
+
     fun get(family: ThemeFamily, dark: Boolean): TerminalPalette = when (family) {
         ThemeFamily.DRACULA -> if (dark) draculaDark else draculaLight
         ThemeFamily.NORD -> if (dark) nordDark else nordLight

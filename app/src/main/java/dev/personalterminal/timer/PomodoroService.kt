@@ -30,7 +30,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-enum class Phase { IDLE, FOCUS, BREAK, LONG_BREAK }
+enum class Phase { IDLE, FOCUS, BREAK, LONG_BREAK, STOPWATCH }
 
 data class TimerState(
     val phase: Phase = Phase.IDLE,
@@ -46,9 +46,14 @@ data class TimerState(
     val focusedSeconds: Int = 0,
     /** Wall-clock time (epoch ms) at which the current phase ends. Only meaningful while [running]. */
     val endsAtMs: Long = 0L,
+    /** Stopwatch: seconds elapsed (counts up, no end). */
+    val elapsedSeconds: Int = 0,
+    /** Epoch ms when the current phase started (for the session log). */
+    val startedAtMs: Long = 0L,
 ) {
-    val fraction: Float get() = if (totalSeconds == 0) 0f else 1f - remainingSeconds.toFloat() / totalSeconds
-    val clock: String get() = formatClock(remainingSeconds)
+    val isStopwatch: Boolean get() = phase == Phase.STOPWATCH
+    val fraction: Float get() = if (isStopwatch) (elapsedSeconds % 3600) / 3600f else if (totalSeconds == 0) 0f else 1f - remainingSeconds.toFloat() / totalSeconds
+    val clock: String get() = formatClock(if (isStopwatch) elapsedSeconds else remainingSeconds)
 
     companion object {
         fun formatClock(seconds: Int): String {
@@ -80,12 +85,27 @@ class PomodoroService : Service() {
                 config = Config(focus, brk, longBrk)
                 startPhase(Phase.FOCUS, habitId, habitName)
             }
+            ACTION_STOPWATCH -> {
+                val habitId = intent.getLongExtra(EXTRA_HABIT_ID, 0)
+                val habitName = intent.getStringExtra(EXTRA_HABIT_NAME) ?: ""
+                startStopwatch(habitId, habitName)
+            }
             ACTION_PAUSE -> pause()
             ACTION_RESUME -> resume()
             ACTION_SKIP -> skip()
             ACTION_STOP -> stopSession(creditPartial = true)
         }
         return START_STICKY
+    }
+
+    private fun startStopwatch(habitId: Long, habitName: String) {
+        _state.value = TimerState(
+            phase = Phase.STOPWATCH, running = true, habitId = habitId, habitName = habitName,
+            startedAtMs = System.currentTimeMillis(), endsAtMs = System.currentTimeMillis(),
+        )
+        goForeground()
+        startTicker()
+        FocusDnd.enter(this)
     }
 
     private data class Config(val focus: Int, val brk: Int, val longBrk: Int)
@@ -96,16 +116,17 @@ class PomodoroService : Service() {
             Phase.FOCUS -> config.focus
             Phase.BREAK -> config.brk
             Phase.LONG_BREAK -> config.longBrk
-            Phase.IDLE -> 0
+            Phase.IDLE, Phase.STOPWATCH -> 0
         }
         val secs = minutes * 60
         _state.value = _state.value.copy(
             phase = phase, running = true, totalSeconds = secs, remainingSeconds = secs,
-            habitId = habitId, habitName = habitName, focusedSeconds = 0,
-            endsAtMs = System.currentTimeMillis() + secs * 1000L,
+            habitId = habitId, habitName = habitName, focusedSeconds = 0, elapsedSeconds = 0,
+            endsAtMs = System.currentTimeMillis() + secs * 1000L, startedAtMs = System.currentTimeMillis(),
         )
         goForeground()
         startTicker()
+        if (phase == Phase.FOCUS) FocusDnd.enter(this) else FocusDnd.exit(this)
     }
 
     /**
@@ -121,6 +142,14 @@ class PomodoroService : Service() {
                 delay(1000 - now % 1000) // align to the next second boundary
                 val s = _state.value
                 if (!s.running) continue
+                if (s.isStopwatch) {
+                    val elapsed = ((System.currentTimeMillis() - s.endsAtMs) / 1000).toInt().coerceAtLeast(0)
+                    if (elapsed != s.elapsedSeconds) {
+                        _state.value = s.copy(elapsedSeconds = elapsed, focusedSeconds = elapsed)
+                        if (elapsed % 5 == 0) updateNotification()
+                    }
+                    continue
+                }
                 val remaining = ((s.endsAtMs - System.currentTimeMillis() + 999) / 1000).toInt().coerceIn(0, s.totalSeconds)
                 if (remaining == s.remainingSeconds) continue
                 val focused = if (s.phase == Phase.FOCUS) s.totalSeconds - remaining else s.focusedSeconds
@@ -135,7 +164,7 @@ class PomodoroService : Service() {
         buzz()
         postPhaseDoneAlert(s)
         if (s.phase == Phase.FOCUS) {
-            creditFocus(s.habitId, config.focus)
+            recordSession(s, config.focus, completed = true)
             val cycle = s.cycle + 1
             _state.value = s.copy(cycle = cycle)
             startPhase(if (cycle % 4 == 0) Phase.LONG_BREAK else Phase.BREAK)
@@ -144,15 +173,19 @@ class PomodoroService : Service() {
         }
     }
 
-    private fun creditFocus(habitId: Long, minutes: Int) {
-        if (habitId == 0L || minutes <= 0) return
+    /** Persists the session (heatmap / history) and credits whole minutes to the bound habit. */
+    private fun recordSession(s: TimerState, minutes: Int, completed: Boolean) {
+        if (minutes <= 0) return
         val app = PersonalTerminalApp.get(this)
-        scope.launch { app.habits.addValue(habitId, minutes) }
+        val kind = if (s.isStopwatch) dev.personalterminal.data.db.FocusSession.KIND_STOPWATCH else dev.personalterminal.data.db.FocusSession.KIND_FOCUS
+        val started = if (s.startedAtMs > 0) s.startedAtMs else System.currentTimeMillis() - minutes * 60_000L
+        scope.launch { app.habits.recordSession(s.habitId, started, System.currentTimeMillis(), minutes, kind, completed) }
     }
 
     private fun pause() {
         val s = _state.value
         if (!s.running) return
+        if (s.isStopwatch) { _state.value = s.copy(running = false); updateNotification(); return }
         val remaining = ((s.endsAtMs - System.currentTimeMillis() + 999) / 1000).toInt().coerceIn(0, s.totalSeconds)
         _state.value = s.copy(running = false, remainingSeconds = remaining)
         updateNotification()
@@ -161,24 +194,34 @@ class PomodoroService : Service() {
     private fun resume() {
         val s = _state.value
         if (s.running || s.phase == Phase.IDLE) return
-        _state.value = s.copy(running = true, endsAtMs = System.currentTimeMillis() + s.remainingSeconds * 1000L)
+        if (s.isStopwatch) {
+            // endsAtMs doubles as the "virtual start" for the stopwatch: shift it so elapsed continues.
+            _state.value = s.copy(running = true, endsAtMs = System.currentTimeMillis() - s.elapsedSeconds * 1000L)
+        } else {
+            _state.value = s.copy(running = true, endsAtMs = System.currentTimeMillis() + s.remainingSeconds * 1000L)
+        }
         updateNotification()
     }
 
     private fun skip() {
         val s = _state.value
-        if (s.phase == Phase.FOCUS) {
-            // partial credit for whole minutes focused
-            creditFocus(s.habitId, s.focusedSeconds / 60)
-            startPhase(Phase.BREAK)
-        } else startPhase(Phase.FOCUS)
+        when (s.phase) {
+            Phase.STOPWATCH -> stopSession(creditPartial = true)
+            Phase.FOCUS -> {
+                // partial credit for whole minutes focused
+                recordSession(s, s.focusedSeconds / 60, completed = false)
+                startPhase(Phase.BREAK)
+            }
+            else -> startPhase(Phase.FOCUS)
+        }
     }
 
     private fun stopSession(creditPartial: Boolean) {
         val s = _state.value
-        if (creditPartial && s.phase == Phase.FOCUS) creditFocus(s.habitId, s.focusedSeconds / 60)
+        if (creditPartial && (s.phase == Phase.FOCUS || s.isStopwatch)) recordSession(s, s.focusedSeconds / 60, completed = s.isStopwatch)
         ticker?.cancel()
         _state.value = TimerState()
+        FocusDnd.exit(this)
         NotificationManagerCompat.from(this).cancel(ALERT_NOTIF_ID)
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -216,15 +259,16 @@ class PomodoroService : Service() {
             Phase.FOCUS -> "focus"
             Phase.BREAK -> "break"
             Phase.LONG_BREAK -> "long break"
+            Phase.STOPWATCH -> "stopwatch"
             Phase.IDLE -> "idle"
         }
         val glyph = when {
             !s.running -> "‖"
-            s.phase == Phase.FOCUS -> "▶"
+            s.phase == Phase.FOCUS || s.isStopwatch -> "▶"
             else -> "☕"
         }
         val title = "$phaseLabel $glyph ${s.clock}" + if (!s.running) " (paused)" else ""
-        val bar = asciiBar(s.fraction, 16)
+        val bar = if (s.isStopwatch) "elapsed" else asciiBar(s.fraction, 16)
         val text = buildString {
             append(bar)
             if (s.habitName.isNotBlank()) append("  ").append(s.habitName)
@@ -262,9 +306,13 @@ class PomodoroService : Service() {
             // Android 16 Live Update opt-in (ignored on older versions).
             .setRequestPromotedOngoing(true)
             .addAction(if (s.running) action(ACTION_PAUSE, "pause") else action(ACTION_RESUME, "resume"))
-            .addAction(action(ACTION_SKIP, "skip"))
-            .addAction(action(ACTION_STOP, "stop"))
-        if (s.running) {
+        if (!s.isStopwatch) b.addAction(action(ACTION_SKIP, "skip"))
+        b.addAction(action(ACTION_STOP, "stop"))
+        if (s.isStopwatch) {
+            b.setStyle(null)
+            if (s.running) b.setWhen(s.endsAtMs).setShowWhen(true).setUsesChronometer(true).setChronometerCountDown(false)
+            else b.setShowWhen(false).setUsesChronometer(false)
+        } else if (s.running) {
             // Header chronometer counts down to the phase end without further updates from us, and
             // the Live Update status chip shows the same ticking countdown (chip text is only used
             // when no chronometer is running, so leave shortCriticalText unset here).
@@ -326,6 +374,7 @@ class PomodoroService : Service() {
         const val ACTION_RESUME = "dev.personalterminal.timer.RESUME"
         const val ACTION_SKIP = "dev.personalterminal.timer.SKIP"
         const val ACTION_STOP = "dev.personalterminal.timer.STOP"
+        const val ACTION_STOPWATCH = "dev.personalterminal.timer.STOPWATCH"
         const val EXTRA_FOCUS_MIN = "focus"
         const val EXTRA_BREAK_MIN = "break"
         const val EXTRA_LONG_BREAK_MIN = "long_break"
@@ -340,6 +389,25 @@ class PomodoroService : Service() {
                 .putExtra(EXTRA_FOCUS_MIN, focusMin).putExtra(EXTRA_BREAK_MIN, breakMin).putExtra(EXTRA_LONG_BREAK_MIN, longBreakMin)
                 .putExtra(EXTRA_HABIT_ID, habitId).putExtra(EXTRA_HABIT_NAME, habitName)
             context.startForegroundService(i)
+        }
+
+        fun startStopwatch(context: Context, habitId: Long, habitName: String) {
+            val i = Intent(context, PomodoroService::class.java).setAction(ACTION_STOPWATCH)
+                .putExtra(EXTRA_HABIT_ID, habitId).putExtra(EXTRA_HABIT_NAME, habitName)
+            context.startForegroundService(i)
+        }
+
+        /**
+         * Starts a focus session for [habit] (or a free one) using the habit's own focus/break
+         * lengths when set, otherwise the global pomodoro settings.
+         */
+        suspend fun startFor(context: Context, habitId: Long) {
+            val app = PersonalTerminalApp.get(context)
+            val s = app.prefs.current()
+            val h = if (habitId != 0L) app.habits.habit(habitId) else null
+            val focus = h?.focusMinutes?.takeIf { it > 0 } ?: s.pomodoroFocusMin
+            val brk = h?.breakMinutes?.takeIf { it > 0 } ?: s.pomodoroBreakMin
+            start(context, focus, brk, s.pomodoroLongBreakMin, h?.id ?: 0L, h?.name ?: "")
         }
 
         fun send(context: Context, action: String) {

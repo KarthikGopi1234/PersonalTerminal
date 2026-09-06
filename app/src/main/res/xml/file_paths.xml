@@ -3,4 +3,5 @@
     <files-path name="watch_photos" path="watch_photos/" />
     <cache-path name="camera_cache" path="camera/" />
     <files-path name="backups" path="backups/" />
+    <cache-path name="exports" path="exports/" />
 </paths>
