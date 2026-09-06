@@ -127,8 +127,6 @@ android {
         }
     }
 
-    sourceSets.getByName("test").assets.srcDir("$projectDir/schemas")
-
     testOptions {
         // Robolectric renders the real Compose screens on the JVM (used by the screenshot suite).
         unitTests.isIncludeAndroidResources = true
@@ -140,6 +138,11 @@ ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
     arg("room.incremental", "true")
 }
+
+// Room's exported schemas are packaged as *debug* assets so the Robolectric migration test can
+// load them through the instrumentation asset manager (test-source-set assets are not merged
+// for local unit tests). Release builds never see them.
+android.sourceSets.getByName("debug").assets.srcDir("$projectDir/schemas")
 
 /** Writes the resolved version to app/build/version.properties (consumed by the release workflow). */
 tasks.register("printVersion") {
