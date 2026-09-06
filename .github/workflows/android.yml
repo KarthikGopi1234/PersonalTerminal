@@ -1,7 +1,9 @@
 name: Android CI & Release
 
-# Every push to main: test → lint → build debug + release APKs → publish a GitHub Release
-# whose notes are the commit message (subject = title, body = notes).
+# Every push to main: test → lint → build debug (smoke test only) + release APK → publish a
+# GitHub Release whose notes are the commit message (subject = title, body = notes).
+# Only the release APK and its checksum are attached to the release; the debug build is kept
+# as a workflow artifact for 14 days in case a debugger is needed.
 # Pull requests only run the build/test part.
 
 on:
@@ -74,7 +76,7 @@ jobs:
       - name: Lint
         run: ./gradlew lintDebug --console=plain
 
-      - name: Assemble debug APK
+      - name: Assemble debug APK (smoke test, not released)
         run: ./gradlew assembleDebug --console=plain
 
       - name: Assemble release APK
@@ -90,20 +92,28 @@ jobs:
           VERSION=$(grep -E '^app.versionName=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')
           BUILD=${{ github.run_number }}
           TAG="v${VERSION}-build.${BUILD}"
-          mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk "dist/personal-terminal-${VERSION}-build.${BUILD}-debug.apk"
+          mkdir -p dist debug-dist
           REL=$(ls app/build/outputs/apk/release/*.apk | head -n1)
-          cp "$REL" "dist/personal-terminal-${VERSION}-build.${BUILD}-release.apk"
+          cp "$REL" "dist/personal-terminal-${VERSION}-build.${BUILD}.apk"
           (cd dist && sha256sum *.apk > SHA256SUMS.txt)
+          cp app/build/outputs/apk/debug/app-debug.apk "debug-dist/personal-terminal-${VERSION}-build.${BUILD}-debug.apk"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          ls -la dist
+          ls -la dist debug-dist
 
-      - name: Upload build artifacts
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
           name: personal-terminal-${{ steps.meta.outputs.tag }}
           path: dist/*
+          if-no-files-found: error
+
+      - name: Upload debug APK (workflow artifact only)
+        uses: actions/upload-artifact@v4
+        with:
+          name: personal-terminal-${{ steps.meta.outputs.tag }}-debug
+          path: debug-dist/*
+          retention-days: 14
           if-no-files-found: error
 
       - name: Upload lint report
@@ -133,9 +143,10 @@ jobs:
             echo "**Release signing:** ${{ steps.keystore.outputs.signed == 'true' && 'release keystore' || 'debug key (set RELEASE_KEYSTORE_* secrets for a production signature)' }}"
             echo
             echo "### Assets"
-            echo "- \`*-release.apk\` – minified R8 build (recommended)"
-            echo "- \`*-debug.apk\` – debuggable build with \`.debug\` application id (installs side-by-side)"
-            echo "- \`SHA256SUMS.txt\` – checksums"
+            echo "- \`personal-terminal-${{ steps.meta.outputs.version }}-build.${{ github.run_number }}.apk\` – install this (minified R8 release build, package \`dev.personalterminal\`)"
+            echo "- \`SHA256SUMS.txt\` – checksum to verify the download"
+            echo
+            echo "_A debuggable build is available as a workflow artifact on the [Actions run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for 14 days._"
           } > RELEASE_NOTES.md
           echo "title=${SUBJECT}" >> "$GITHUB_OUTPUT"
           cat RELEASE_NOTES.md

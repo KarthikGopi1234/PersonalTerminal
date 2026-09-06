@@ -101,10 +101,16 @@ Or use `scripts/build.sh` which runs tests + lint + assemble in one go.
 
 ### Continuous delivery
 
-Every push to `main` runs `.github/workflows/android.yml`: unit tests → lint → debug + release APKs →
-a **GitHub Release** tagged `v<version>-build.<run number>` whose title and notes are the **commit message**
-(subject → release title, body → release notes). `app.versionName` in `gradle.properties` is the marketing
-version; `versionCode` is the CI run number, so every release installs as an upgrade over the previous one.
+Every push to `main` runs `.github/workflows/android.yml`: unit tests → lint → debug build (smoke test) →
+release build → a **GitHub Release** tagged `v<version>-build.<run number>` whose title and notes are the
+**commit message** (subject → release title, body → release notes).
+
+The release page carries a single installable asset, `personal-terminal-<version>-build.<n>.apk` (R8-minified,
+package `dev.personalterminal`), plus `SHA256SUMS.txt`. The debuggable variant (`dev.personalterminal.debug`,
+installs side-by-side) is not released; it is kept as a workflow artifact on the Actions run for 14 days.
+
+`app.versionName` in `gradle.properties` is the marketing version; `versionCode` is the CI run number, so every
+release installs as an upgrade over the previous one.
 
 Optional repository secrets:
 
