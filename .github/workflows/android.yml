@@ -29,6 +29,8 @@ jobs:
     timeout-minutes: 45
     env:
       GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
+      # R8/D8 are memory hungry; make the heap explicit on the runner (7 GB RAM) instead of trusting defaults.
+      GRADLE_OPTS: -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=768m -XX:+UseParallelGC -Dfile.encoding=UTF-8"
 
     steps:
       - name: Checkout
@@ -72,12 +74,15 @@ jobs:
       - name: Lint
         run: ./gradlew lintDebug --console=plain
 
-      - name: Assemble APKs
+      - name: Assemble debug APK
+        run: ./gradlew assembleDebug --console=plain
+
+      - name: Assemble release APK
         env:
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
-        run: ./gradlew assembleDebug assembleRelease --console=plain
+        run: ./gradlew assembleRelease --console=plain
 
       - name: Collect artifacts
         id: meta
