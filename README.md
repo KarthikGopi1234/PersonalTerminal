@@ -89,8 +89,8 @@ Dark **and** light variants of **Dracula** (Alucard), **Nord**, **Solarized**, *
 Requirements: **JDK 17**, Android SDK with **platform 35** and **build-tools 35.0.0** (the Gradle wrapper downloads Gradle 8.9).
 
 ```bash
-git clone https://github.com/<you>/personal-terminal.git
-cd personal-terminal
+git clone https://github.com/KarthikGopi1234/PersonalTerminal.git
+cd PersonalTerminal
 echo "sdk.dir=$ANDROID_HOME" > local.properties
 ./gradlew assembleDebug            # → app/build/outputs/apk/debug/app-debug.apk
 ./gradlew testDebugUnitTest        # streak / progression engine tests
@@ -98,6 +98,24 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 ```
 
 Or use `scripts/build.sh` which runs tests + lint + assemble in one go.
+
+### Continuous delivery
+
+Every push to `main` runs `.github/workflows/android.yml`: unit tests → lint → debug + release APKs →
+a **GitHub Release** tagged `v<version>-build.<run number>` whose title and notes are the **commit message**
+(subject → release title, body → release notes). `app.versionName` in `gradle.properties` is the marketing
+version; `versionCode` is the CI run number, so every release installs as an upgrade over the previous one.
+
+Optional repository secrets:
+
+| Secret | Purpose |
+|--------|---------|
+| `GOOGLE_WEB_CLIENT_ID` | Bakes the Drive OAuth client id into CI builds |
+| `RELEASE_KEYSTORE_BASE64` | `base64 -w0 release.jks` – enables a proper release signature |
+| `RELEASE_STORE_PASSWORD` / `RELEASE_KEY_ALIAS` / `RELEASE_KEY_PASSWORD` | Keystore credentials |
+
+Without the keystore secrets the release APK is signed with the debug key (still installable; CI prints a warning).
+Generate a keystore with `keytool -genkeypair -v -keystore release.jks -alias personal-terminal -keyalg RSA -keysize 4096 -validity 10000`.
 
 ### Google Drive setup (optional, needed for sync)
 

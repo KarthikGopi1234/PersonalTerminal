@@ -17,6 +17,16 @@ val googleWebClientId: String = (localProps.getProperty("GOOGLE_WEB_CLIENT_ID")
     ?: System.getenv("GOOGLE_WEB_CLIENT_ID")
     ?: "")
 
+// Versioning: marketing version lives in gradle.properties; versionCode = GitHub Actions run number
+// so every CI build is installable as an upgrade over the previous one. Local builds use 1.
+val baseVersionName: String = providers.gradleProperty("app.versionName").getOrElse("0.1.0")
+val ciBuildNumber: Int? = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+
+// Release signing: provided through env vars / local.properties (CI decodes the keystore from secrets).
+fun secret(name: String): String? = localProps.getProperty(name) ?: System.getenv(name)
+val releaseStoreFile: String? = secret("RELEASE_STORE_FILE")
+val hasReleaseKey: Boolean = !releaseStoreFile.isNullOrBlank() && file(releaseStoreFile).exists()
+
 android {
     namespace = "dev.personalterminal"
     compileSdk = 35
@@ -25,13 +35,24 @@ android {
         applicationId = "dev.personalterminal"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = ciBuildNumber ?: 1
+        versionName = baseVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
 
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$googleWebClientId\"")
+    }
+
+    signingConfigs {
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = secret("RELEASE_STORE_PASSWORD")
+                keyAlias = secret("RELEASE_KEY_ALIAS")
+                keyPassword = secret("RELEASE_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -43,6 +64,8 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Fall back to the debug key so the release APK is always installable; CI warns when this happens.
+            signingConfig = if (hasReleaseKey) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
         }
     }
 
