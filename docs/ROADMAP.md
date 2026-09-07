@@ -77,8 +77,8 @@ have been removed rather than left open.
 | # | Feature | Why | Effort |
 |---|---------|-----|--------|
 | 6.1 ✅ | **Real command line**: a prompt at the bottom of Today that accepts `done stretch`, `add water 2`, `wear speedy`, `timer 25`, `theme nord`, `help` — with tab-completion chips and history | The app's whole identity; power users would live in it | M |
-| 6.2 ✅ | **Custom themes** (import an iTerm2/Windows-Terminal JSON colour scheme) + a couple more built-ins (Tokyo Night, Rosé Pine, One Dark) | Themes are the most requested cosmetic feature in this genre | S |
-| 6.3 ✅ | **Font choice** (JetBrains Mono, Fira Code, IBM Plex Mono, Berkeley Mono if user-supplied) and ligature toggle | — | S |
+| 6.2 ✅ | **Custom themes** (import an iTerm2/Windows-Terminal JSON colour scheme) + more built-ins — 14 shipped: Tokyo Night, One Dark, Rosé Pine, Everforest, Amber CRT, Hacker, Synthwave '84 added in 0.3.3, each paired with its own typeface | Themes are the most requested cosmetic feature in this genre | S |
+| 6.3 ✅ | **Font choice** — nine bundled families (JetBrains Mono, Fira Code, Roboto Mono, IBM Plex Mono, Source Code Pro, Victor Mono, Space Mono, VT323, system); themes carry a paired font, manual picks pin it. **Selectable launcher icon** (six variants) landed alongside in 0.3.3 | — | S |
 | 6.4 ✅ | **CRT / scanline shader** done properly with `RenderEffect` (currently a simple overlay), plus an optional typing sound | Nostalgia dial | S |
 | 6.5 ✅ | **Landscape / tablet layout**: tmux-style split panes (today | timeline) | Foldables and tablets | M |
 | 6.6 ✅ | **Accessibility pass**: TalkBack labels for ASCII bars/checkboxes, larger-font layouts, reduced-motion toggle | Broadens the audience and is the right thing to do | S |
@@ -108,3 +108,5 @@ have been removed rather than left open.
 1. **Ambient sounds (2.4)** – rain / brown noise / keyboard clicks under the timer.
 2. **Wrist-shot camera frame (3.9)** – rule-of-thirds overlay and an EXIF stamp with the watch name.
 3. **Multi-device sync (7.3)** – encrypted backups + Drive folder give it a base to stand on.
+
+Further candidates — sleep anchors, pause-until, streak repair window, ramping targets, a vault widget and more — live in [IDEAS.md](IDEAS.md) with an honest effort estimate for each.
