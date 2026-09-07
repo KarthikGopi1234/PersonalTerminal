@@ -6,14 +6,15 @@
 
 ## What it does
 
-- **Habits** — checkbox, counter (`5/8 cups`), timer and *avoid* modes (`no sugar`: clean days grow the streak, a slip breaks it); routines with daily / weekly / custom schedules; 22 templates; per-habit reminders with quiet hours; skip-with-reason, completion notes and mood.
+- **Habits** — checkbox, counter (`5/8 cups`), timer and *avoid* modes (`no sugar`: clean days grow the streak, a slip breaks it); routines with daily / weekly / custom schedules; 22 templates; per-habit reminders plus an evening *check-in* ("did you do X today?" with done / skip buttons), streak-at-risk notices and quiet hours; skip-with-reason, completion notes and mood.
 - **Streaks & shields** — earned streak freezes protect a chain after a missed day; skips bridge it for free.
-- **Command line** — a real prompt on Today: `done stretch`, `add 2 water`, `timer 25 focus`, `wear speedy`, `skip run -- sick`, `watch next`, `help`.
+- **Command line** — a real prompt on Today: `done stretch`, `add 2 water`, `timer 25 focus`, `wear speedy`, `skip run -- sick`, `remind read 21:00`, `watch next`, `help`.
 - **Focus** — pomodoro with per-habit intervals, stopwatch mode, optional Do-Not-Disturb, session history on its own heatmap, Quick Settings tile, live countdown notification (Android 16 Live Update).
 - **Insights** — GitHub-style heatmap, XP and levels, weekly review as a shareable monospace card, `man achievements`, per-habit heatmaps and cross-habit correlations.
 - **Widgets** — tick habits off from the home screen (today list), plus status and timer widgets; app shortcuts; Tasker / adb intent API; Health Connect auto-completion.
-- **Watch tracker** — photograph today's watch, collection stats (wear share, neglected, cost per wear), service log with reminders, accuracy / drift, strap library, `watch next` rotation suggester, purchase & valuation, CSV export.
+- **Watch tracker** — photograph today's watch, an optional daily "which watch today?" notice with a one-tap *wear it*, collection stats (wear share, neglected, cost per wear), service log with reminders, accuracy / drift, strap library, `watch next` rotation suggester, purchase & valuation, CSV export.
 - **Backup** — automatic Google Drive backups (optionally AES-256 encrypted), restore on first launch, local export/import, importers for Loop Habit Tracker and Habitica.
+- **Notifications, your way** — every notification the app can send (habit reminders, check-in, streak at risk, weekly review, wear log, service due, timer alerts) has its own switch and time under settings › notifications, behind one master switch and shared quiet hours.
 - **Terminal feel** — Dracula, Nord, Solarized, Gruvbox, Monokai, Catppuccin, Matrix or an imported colour scheme · light & dark · JetBrains Mono / Fira Code / Roboto Mono · CRT shader · tablet split panes · accessibility mode.
 
 ## Screenshots

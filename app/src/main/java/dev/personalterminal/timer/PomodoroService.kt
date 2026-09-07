@@ -74,6 +74,13 @@ class PomodoroService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private var prefsJob: kotlinx.coroutines.Job? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        prefsJob = scope.launch { PersonalTerminalApp.get(this@PomodoroService).prefs.settings.collect { alertsEnabled = it.notifications.timerAlerts } }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
@@ -110,6 +117,8 @@ class PomodoroService : Service() {
 
     private data class Config(val focus: Int, val brk: Int, val longBrk: Int)
     private var config = Config(25, 5, 15)
+    /** Mirrors `settings.notifications.timerAlerts` (kept fresh while the service lives). */
+    @Volatile private var alertsEnabled = true
 
     private fun startPhase(phase: Phase, habitId: Long = _state.value.habitId, habitName: String = _state.value.habitName) {
         val minutes = when (phase) {
@@ -161,8 +170,7 @@ class PomodoroService : Service() {
 
     private fun onPhaseFinished() {
         val s = _state.value
-        buzz()
-        postPhaseDoneAlert(s)
+        if (alertsEnabled) { buzz(); postPhaseDoneAlert(s) }
         if (s.phase == Phase.FOCUS) {
             recordSession(s, config.focus, completed = true)
             val cycle = s.cycle + 1
@@ -363,6 +371,7 @@ class PomodoroService : Service() {
 
     override fun onDestroy() {
         ticker?.cancel()
+        prefsJob?.cancel()
         super.onDestroy()
     }
 

@@ -37,6 +37,8 @@ object WatchServiceReminder {
 
     suspend fun check(context: Context) {
         val app = PersonalTerminalApp.get(context)
+        val settings = app.prefs.current()
+        if (!settings.remindersEnabled || !settings.notifications.watchService) return
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return

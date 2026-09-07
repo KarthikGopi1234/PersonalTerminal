@@ -89,6 +89,34 @@ object Commands {
                 "", "ls" -> ok("open watches", Routes.WATCHES)
                 else -> watch(app, rest)?.let { ok("open ${it.displayName}", Routes.watchDetail(it.id)) } ?: err("no watch matches '$rest'")
             }
+            "remind", "notify" -> {
+                // remind <habit> 07:30 | remind <habit> off | remind <habit> checkin on|off | remind (list)
+                if (rest.isBlank()) {
+                    val hs = app.habits.allHabits().filter { !it.archived && (it.reminderMinutes >= 0 || it.checkIn) }
+                    return ok(hs.joinToString("\n") { h -> "⏰ " + h.name + (if (h.reminderMinutes >= 0) " %02d:%02d".format(h.reminderMinutes / 60, h.reminderMinutes % 60) else "") + (if (h.checkIn) " · check-in" else "") }.ifBlank { "no reminders set · remind <habit> 07:30" })
+                }
+                val words = rest.split(Regex("\\s+"))
+                val last = words.last().lowercase()
+                val timeMatch = Regex("^(\\d{1,2})(?::(\\d{2}))?$").matchEntire(last)
+                val h: dev.personalterminal.data.db.Habit?
+                val result: String
+                when {
+                    words.size >= 3 && words[words.size - 2].lowercase() in setOf("checkin", "check-in", "ci") && last in setOf("on", "off") -> {
+                        h = habit(app, words.dropLast(2).joinToString(" ")) ?: return noHabit(rest)
+                        app.habits.saveHabit(h.copy(checkIn = last == "on")); result = "${h.name}: evening check-in ${last}"
+                    }
+                    last == "off" -> { h = habit(app, words.dropLast(1).joinToString(" ")) ?: return noHabit(rest); app.habits.saveHabit(h.copy(reminderMinutes = -1)); result = "${h.name}: reminder off" }
+                    timeMatch != null -> {
+                        val hh = timeMatch.groupValues[1].toInt(); val mm = timeMatch.groupValues[2].ifBlank { "0" }.toInt()
+                        if (hh !in 0..23 || mm !in 0..59) return err("time must be HH:MM")
+                        h = habit(app, words.dropLast(1).joinToString(" ")) ?: return noHabit(rest)
+                        app.habits.saveHabit(h.copy(reminderMinutes = hh * 60 + mm)); result = "${h.name}: reminder at %02d:%02d".format(hh, mm)
+                    }
+                    else -> return err("usage: remind <habit> 07:30 | off | checkin on|off")
+                }
+                runCatching { dev.personalterminal.reminders.ReminderScheduler.reschedule(context) }
+                ok("⏰ $result")
+            }
             "shield" -> habit(app, rest)?.let { h ->
                 val day = app.habits.streakFor(h.id, date)?.repairableDay ?: return err("${h.name}: nothing to repair")
                 if (app.habits.useShield(h.id, day)) ok("⛨ shield used for ${h.name} on $day") else err("no shields available")
@@ -214,6 +242,7 @@ object Commands {
         |timer [min] [habit]   stopwatch [habit]
         |timer stop|pause      wear <watch>
         |watch next            shield <habit>
+        |remind <habit> 07:30  remind <habit> checkin on
         |habit add [template]  ls · status
         |review · man · insights · theme <name>
     """.trimMargin()

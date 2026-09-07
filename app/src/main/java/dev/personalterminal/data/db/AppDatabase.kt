@@ -22,7 +22,7 @@ class Converters {
         Routine::class, Habit::class, HabitLog::class, ShieldUse::class, Watch::class, WearLog::class, XpEvent::class,
         FocusSession::class, WatchService::class, AccuracyReading::class, Strap::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -61,10 +61,17 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun get(context: Context): AppDatabase = INSTANCE ?: synchronized(this) {
             INSTANCE ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
                 .also { INSTANCE = it }
+        }
+
+        /** 0.3 → 0.3.1: per-habit evening check-in flag. */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE habits ADD COLUMN checkIn INTEGER NOT NULL DEFAULT 0")
+            }
         }
 
         /** 0.2 → 0.3: habit loop + timer sessions + watch tracker tables. Additive only – no data is touched. */

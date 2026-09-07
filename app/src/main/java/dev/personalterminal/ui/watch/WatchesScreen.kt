@@ -22,8 +22,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,6 +50,7 @@ import dev.personalterminal.ui.components.TermButton
 import dev.personalterminal.ui.components.TerminalPanel
 import dev.personalterminal.ui.navigation.Routes
 import dev.personalterminal.ui.theme.Term
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 
 @Composable
@@ -55,6 +60,7 @@ fun WatchesScreen(app: PersonalTerminalApp, nav: NavHostController) {
     val counts by remember { app.watches.observeWearCounts() }.collectAsStateWithLifecycle(initialValue = emptyList())
     val today = AppClock.today()
     val wornToday by remember { app.watches.observeWearForDay(today) }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val scope = rememberCoroutineScope()
     val countMap = counts.associate { it.watchId to it.count }
     val maxCount = (counts.maxOfOrNull { it.count } ?: 1).coerceAtLeast(1)
 
@@ -88,8 +94,28 @@ fun WatchesScreen(app: PersonalTerminalApp, nav: NavHostController) {
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TermButton("watch stats", onClick = { nav.navigate(Routes.WATCH_STATS) }, color = p.green, modifier = Modifier.weight(1f))
-                TermButton("watch next", onClick = { nav.navigate(Routes.WATCH_STATS) }, color = p.yellow, modifier = Modifier.weight(1f))
                 TermButton("straps", onClick = { nav.navigate(Routes.STRAPS) }, color = p.purple, modifier = Modifier.weight(1f))
+            }
+        }
+        // `watch next` – the rotation suggester, inline: one tap logs it, the row opens the watch.
+        if (watches.size >= 2 && wornToday.isEmpty()) item {
+            var next by remember { mutableStateOf<Pair<Watch, String>?>(null) }
+            val mutations by app.habits.mutations.collectAsStateWithLifecycle()
+            LaunchedEffect(mutations, counts) { next = app.watches.suggestNext(today) }
+            val n = next
+            if (n != null) TerminalPanel(title = "watch next", titleColor = p.yellow, onClick = { nav.navigate(Routes.watchDetail(n.first.id)) }) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    WatchThumb(app, n.first, 40.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(n.first.displayName, color = p.fg, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(n.second, color = p.fgDim, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    TermButton("wear it", filled = true, color = p.yellow, onClick = {
+                        scope.launch { app.watches.logWear(n.first.id, today); app.habits.mutations.value = System.currentTimeMillis() }
+                    })
+                }
             }
         }
         if (watches.isEmpty()) item { Comment("your collection is empty · add a watch to start tracking wrist time") }

@@ -55,6 +55,8 @@ data class Settings(
     val lastReviewDay: Long = 0L,
     /** Whether first-launch restore-from-Drive was offered already. */
     val restoreOffered: Boolean = false,
+    /** Which notifications the app may send (see [NotificationPrefs]). */
+    val notifications: NotificationPrefs = NotificationPrefs(),
 ) {
     val prompt: String get() = "$username@$hostname"
     val hasQuietHours: Boolean get() = quietStartMin != quietEndMin
@@ -65,6 +67,38 @@ data class Settings(
         return if (quietStartMin < quietEndMin) minuteOfDay in quietStartMin until quietEndMin
         else minuteOfDay >= quietStartMin || minuteOfDay < quietEndMin
     }
+}
+
+/**
+ * Every notification the app can send, individually switchable from settings. [remindersEnabled]
+ * in [Settings] stays the master switch for everything except the running-timer notification (which
+ * is what keeps the foreground service alive) and Drive backup failures.
+ *
+ * Times are minutes after local midnight. Quiet hours apply to all of them.
+ */
+data class NotificationPrefs(
+    /** "time to do it" nudge at each habit's own [dev.personalterminal.data.db.Habit.reminderMinutes]. */
+    val habitReminders: Boolean = true,
+    /** Evening "did you do X today?" for habits flagged with `checkIn`, sent once at [checkInMinutes]. */
+    val habitCheckIn: Boolean = true,
+    val checkInMinutes: Int = 20 * 60,
+    /** Daily "which watch is on the wrist today?" if nothing was logged yet, at [wearLogMinutes]. */
+    val wearLog: Boolean = false,
+    val wearLogMinutes: Int = 9 * 60,
+    /** Service / maintenance due notices for watches with a service interval. */
+    val watchService: Boolean = true,
+    /** Focus / break finished alert (sound + heads-up) from the pomodoro. */
+    val timerAlerts: Boolean = true,
+    /** One evening notice when a streak ≥ [streakRiskMinStreak] would break tonight, at [streakRiskMinutes]. */
+    val streakRisk: Boolean = true,
+    val streakRiskMinutes: Int = 21 * 60,
+    val streakRiskMinStreak: Int = 3,
+    /** Weekly review ready – Sunday evening at [weeklyReviewMinutes]. */
+    val weeklyReview: Boolean = false,
+    val weeklyReviewMinutes: Int = 18 * 60,
+) {
+    /** True when at least one *scheduled* (time-based) notification is on – used to arm the scheduler. */
+    val anyScheduled: Boolean get() = habitReminders || habitCheckIn || wearLog || streakRisk || weeklyReview
 }
 
 class UserPrefs(private val context: Context) {
@@ -97,6 +131,18 @@ class UserPrefs(private val context: Context) {
         val HEALTH = booleanPreferencesKey("health_connect")
         val LAST_REVIEW = longPreferencesKey("last_review_day")
         val RESTORE_OFFERED = booleanPreferencesKey("restore_offered")
+        val N_HABIT = booleanPreferencesKey("n_habit_reminders")
+        val N_CHECKIN = booleanPreferencesKey("n_check_in")
+        val N_CHECKIN_MIN = intPreferencesKey("n_check_in_min")
+        val N_WEAR = booleanPreferencesKey("n_wear_log")
+        val N_WEAR_MIN = intPreferencesKey("n_wear_log_min")
+        val N_SERVICE = booleanPreferencesKey("n_watch_service")
+        val N_TIMER = booleanPreferencesKey("n_timer_alerts")
+        val N_STREAK = booleanPreferencesKey("n_streak_risk")
+        val N_STREAK_MIN = intPreferencesKey("n_streak_risk_min")
+        val N_STREAK_LEN = intPreferencesKey("n_streak_risk_len")
+        val N_REVIEW = booleanPreferencesKey("n_weekly_review")
+        val N_REVIEW_MIN = intPreferencesKey("n_weekly_review_min")
     }
 
     val settings: Flow<Settings> = context.dataStore.data.map { p ->
@@ -129,6 +175,20 @@ class UserPrefs(private val context: Context) {
             healthConnect = p[Keys.HEALTH] ?: false,
             lastReviewDay = p[Keys.LAST_REVIEW] ?: 0L,
             restoreOffered = p[Keys.RESTORE_OFFERED] ?: false,
+            notifications = NotificationPrefs(
+                habitReminders = p[Keys.N_HABIT] ?: true,
+                habitCheckIn = p[Keys.N_CHECKIN] ?: true,
+                checkInMinutes = p[Keys.N_CHECKIN_MIN] ?: (20 * 60),
+                wearLog = p[Keys.N_WEAR] ?: false,
+                wearLogMinutes = p[Keys.N_WEAR_MIN] ?: (9 * 60),
+                watchService = p[Keys.N_SERVICE] ?: true,
+                timerAlerts = p[Keys.N_TIMER] ?: true,
+                streakRisk = p[Keys.N_STREAK] ?: true,
+                streakRiskMinutes = p[Keys.N_STREAK_MIN] ?: (21 * 60),
+                streakRiskMinStreak = p[Keys.N_STREAK_LEN] ?: 3,
+                weeklyReview = p[Keys.N_REVIEW] ?: false,
+                weeklyReviewMinutes = p[Keys.N_REVIEW_MIN] ?: (18 * 60),
+            ),
         )
     }
 
@@ -164,4 +224,13 @@ class UserPrefs(private val context: Context) {
     suspend fun setHealthConnect(v: Boolean) = context.dataStore.edit { it[Keys.HEALTH] = v }
     suspend fun setLastReviewDay(day: Long) = context.dataStore.edit { it[Keys.LAST_REVIEW] = day }
     suspend fun setRestoreOffered(v: Boolean) = context.dataStore.edit { it[Keys.RESTORE_OFFERED] = v }
+    suspend fun setNotifications(n: NotificationPrefs) = context.dataStore.edit {
+        it[Keys.N_HABIT] = n.habitReminders
+        it[Keys.N_CHECKIN] = n.habitCheckIn; it[Keys.N_CHECKIN_MIN] = n.checkInMinutes
+        it[Keys.N_WEAR] = n.wearLog; it[Keys.N_WEAR_MIN] = n.wearLogMinutes
+        it[Keys.N_SERVICE] = n.watchService
+        it[Keys.N_TIMER] = n.timerAlerts
+        it[Keys.N_STREAK] = n.streakRisk; it[Keys.N_STREAK_MIN] = n.streakRiskMinutes; it[Keys.N_STREAK_LEN] = n.streakRiskMinStreak
+        it[Keys.N_REVIEW] = n.weeklyReview; it[Keys.N_REVIEW_MIN] = n.weeklyReviewMinutes
+    }
 }

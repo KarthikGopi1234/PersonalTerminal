@@ -45,7 +45,7 @@ object DemoData {
         val focus = habits.saveHabit(Habit(name = "focus session", type = HabitType.TIMER, target = 50, unit = "min", routineId = work, color = "orange", position = 3))
         val commit = habits.saveHabit(Habit(name = "commit code", type = HabitType.CHECKBOX, routineId = work, color = "green", position = 4, schedule = ScheduleType.SPECIFIC_DAYS, daysMask = 31))
         val read = habits.saveHabit(Habit(name = "read", type = HabitType.COUNTER, target = 20, unit = "pages", routineId = evening, color = "yellow", position = 5))
-        val journal = habits.saveHabit(Habit(name = "journal", type = HabitType.CHECKBOX, routineId = evening, color = "pink", position = 6))
+        val journal = habits.saveHabit(Habit(name = "journal", type = HabitType.CHECKBOX, routineId = evening, color = "pink", position = 6, reminderMinutes = 21 * 60, checkIn = true))
         val workout = habits.saveHabit(Habit(name = "workout", type = HabitType.CHECKBOX, routineId = null, color = "red", position = 7, schedule = ScheduleType.WEEKLY, timesPerWeek = 3))
         val noSugar = habits.saveHabit(Habit(name = "no sugar", type = HabitType.CHECKBOX, routineId = null, color = "red", position = 8, negative = true,
             reminderMinutes = 21 * 60, createdAt = today.minusDays(40).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()))

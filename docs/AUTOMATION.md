@@ -15,6 +15,8 @@ mood <1-5> [habit]        mood for a habit             timer [min] [habit]  star
 timer stop|pause|resume   control the timer            stopwatch [habit]    count-up session
 wear <watch>              log today's watch            watch next           rotation suggestion
 shield <habit>            repair the latest gap        habit add [template] new habit / from template
+remind <habit> 07:30      set / `off` the reminder     remind <habit> checkin on|off   evening check-in
+remind                    list reminders
 ls · status · review · man · insights · timeline · journal · settings
 theme <name> · dark · light · backup · help
 ```

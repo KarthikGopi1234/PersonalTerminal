@@ -17,6 +17,7 @@ value-for-effort inside each group. Effort: **S** = an evening, **M** = a weeken
 | 1.5 | **Time-of-day sections** (morning / afternoon / evening / any) instead of only routines | Today screen reads like a day plan | S |
 | 1.6 ✅ | **Habit templates** (`habit add --from library`) with ~30 curated presets incl. units and targets | Faster onboarding | S |
 | 1.7 | **Sub-tasks / checklist habits** (pack gym bag → 4 items) | Routine = habits, habit = steps | M |
+| 1.8 ✅ | **Evening check-in** per habit ("did you do X today?" with done / skip actions), **streak-at-risk** notice, **wear-log** notice, and a **per-notification settings matrix** (each kind switchable with its own time, one master switch, shared quiet hours) | Reminders nudge *before*; check-ins catch what was done but never logged – and nobody wants all of them | M |
 
 ## 2. Focus timer
 
@@ -93,7 +94,7 @@ value-for-effort inside each group. Effort: **S** = an evening, **M** = a weeken
 - **2.6 Wear OS tile** is *not* shipped: it needs a separate Wear module and a paired watch to test; the
   phone-side pieces it would talk to (timer state flow, `TimerWidgetAction`, broadcast API) are in place.
 - **7.5** ships as `./gradlew verifyScreenshots` (golden PNGs in `screenshots/`, pixel diff with a 1.5 % tolerance,
-  diffs uploaded as a CI artifact); a Room migration test is still open.
+  diffs uploaded as a CI artifact) plus a Room migration test (1→2→3 against the exported schemas).
 - **5.6 Health Connect** reads steps, exercise sessions, sleep sessions and hydration; the device needs the Health
   Connect app (Android 14 has it built in).
 

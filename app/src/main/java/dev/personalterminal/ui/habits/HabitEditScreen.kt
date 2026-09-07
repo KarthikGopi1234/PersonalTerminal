@@ -75,6 +75,7 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
     var confirmDelete by remember { mutableStateOf(false) }
     var negative by remember { mutableStateOf(false) }
     var reminder by remember { mutableIntStateOf(-1) }
+    var checkIn by remember { mutableStateOf(false) }
     var focusMin by remember { mutableIntStateOf(0) }
     var breakMin by remember { mutableIntStateOf(0) }
     var healthMetric by remember { mutableStateOf("") }
@@ -84,7 +85,7 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
         if (habitId != 0L) app.habits.habit(habitId)?.let { h ->
             original = h; name = h.name; type = h.type; target = h.target; unit = h.unit; schedule = h.schedule
             daysMask = h.daysMask; timesPerWeek = h.timesPerWeek; selectedRoutine = h.routineId; color = h.color; notes = h.notes
-            negative = h.negative; reminder = h.reminderMinutes; focusMin = h.focusMinutes; breakMin = h.breakMinutes; healthMetric = h.healthMetric
+            negative = h.negative; reminder = h.reminderMinutes; checkIn = h.checkIn; focusMin = h.focusMinutes; breakMin = h.breakMinutes; healthMetric = h.healthMetric
         }
         loaded = true
     }
@@ -197,6 +198,19 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
                     else "no quiet hours configured",
                 )
             }
+            // evening check-in: "did you do it?" if still unlogged at the global check-in time
+            val ci = settings.notifications
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { checkIn = !checkIn }.padding(top = 6.dp, bottom = 2.dp)) {
+                Text(if (checkIn) "[✓]" else "[ ]", color = if (checkIn) p.yellow else p.fgDim, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(8.dp))
+                Column {
+                    Text("check-in at %02d:%02d if not logged".format(ci.checkInMinutes / 60, ci.checkInMinutes % 60), color = p.fg, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        if (!ci.habitCheckIn || !settings.remindersEnabled) "check-ins are switched off in settings › notifications" else "asks \"done today?\" with done / skip buttons · time in settings",
+                        color = if (!ci.habitCheckIn || !settings.remindersEnabled) p.red else p.fgDim, style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
         }
 
         if (type == HabitType.TIMER) {
@@ -261,7 +275,7 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
                             name = name.trim(), type = type, target = if (type == HabitType.CHECKBOX) 1 else target.coerceAtLeast(1),
                             unit = unit.trim(), schedule = schedule, daysMask = if (daysMask == 0) 127 else daysMask,
                             timesPerWeek = timesPerWeek, routineId = selectedRoutine, color = color, notes = notes.trim(),
-                            negative = negative && type == HabitType.CHECKBOX, reminderMinutes = reminder,
+                            negative = negative && type == HabitType.CHECKBOX, reminderMinutes = reminder, checkIn = checkIn,
                             focusMinutes = if (type == HabitType.TIMER) focusMin else 0, breakMinutes = if (type == HabitType.TIMER) breakMin else 0,
                             healthMetric = if (type != HabitType.CHECKBOX) healthMetric else "",
                         )

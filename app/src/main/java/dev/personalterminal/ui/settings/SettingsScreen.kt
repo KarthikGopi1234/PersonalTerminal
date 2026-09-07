@@ -26,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -209,23 +210,8 @@ fun SettingsScreen(app: PersonalTerminalApp, nav: NavHostController) {
             ToggleLine("accessibility: bigger targets, higher contrast, no animations", settings.accessibilityMode) { scope.launch { app.prefs.setAccessibilityMode(it) } }
         }
 
-        // ---------------- reminders ----------------
-        TerminalPanel(title = "reminders", titleColor = p.yellow) {
-            ToggleLine("habit reminders", settings.remindersEnabled) { scope.launch { app.prefs.setRemindersEnabled(it); dev.personalterminal.reminders.ReminderScheduler.reschedule(ctx) } }
-            if (!dev.personalterminal.reminders.ReminderScheduler.hasNotificationAccess(ctx)) Comment("notifications are off for this app – allow them from the timer tab", color = p.red)
-            Spacer(Modifier.height(4.dp))
-            Text("quiet hours:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("from ", color = p.fgDim, style = MaterialTheme.typography.bodySmall)
-                Stepper(settings.quietStartMin / 60, { scope.launch { app.prefs.setQuietHours(it * 60, settings.quietEndMin) } }, min = 0, max = 23, suffix = ":00", color = p.yellow)
-                Spacer(Modifier.width(10.dp))
-                Text("to ", color = p.fgDim, style = MaterialTheme.typography.bodySmall)
-                Stepper(settings.quietEndMin / 60, { scope.launch { app.prefs.setQuietHours(settings.quietStartMin, it * 60) } }, min = 0, max = 23, suffix = ":00", color = p.yellow)
-            }
-            Comment(if (settings.hasQuietHours) "reminders inside this window are dropped, not delayed" else "same start and end = no quiet hours")
-            Spacer(Modifier.height(4.dp))
-            Comment("set the time per habit in `habit edit` · ⏰ marks habits with a reminder")
-        }
+        // ---------------- notifications ----------------
+        NotificationsPanel(app, settings, say = { say(it) })
 
         // ---------------- identity ----------------
         TerminalPanel(title = "prompt") {
@@ -446,5 +432,102 @@ private fun ThemeCard(family: ThemeFamily, selected: Boolean, dark: Boolean, mod
                 listOf(pal.red, pal.green, pal.yellow, pal.blue, pal.purple, pal.cyan).forEach { Box(Modifier.size(10.dp).background(it, RoundedCornerShape(2.dp))) }
             }
         }
+    }
+}
+
+
+/**
+ * `notifications` – one line per thing the app can send, each with its own switch (and time where it
+ * applies). The first switch is the master; quiet hours apply to all scheduled notifications.
+ */
+@Composable
+private fun NotificationsPanel(app: PersonalTerminalApp, settings: dev.personalterminal.data.prefs.Settings, say: (String) -> Unit) {
+    val p = Term.palette
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val n = settings.notifications
+    val master = settings.remindersEnabled
+    val access = dev.personalterminal.reminders.ReminderScheduler.hasNotificationAccess(ctx)
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        say(if (granted) "notifications allowed" else "notifications still blocked – allow them in system settings")
+    }
+    var nextSlot by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(settings) { nextSlot = runCatching { dev.personalterminal.reminders.ReminderScheduler.describeNext(ctx) }.getOrNull() }
+    fun update(block: (dev.personalterminal.data.prefs.NotificationPrefs) -> dev.personalterminal.data.prefs.NotificationPrefs) {
+        scope.launch { app.prefs.setNotifications(block(n)); dev.personalterminal.reminders.ReminderScheduler.reschedule(ctx) }
+    }
+
+    TerminalPanel(title = "notifications", titleColor = p.yellow) {
+        ToggleLine("send notifications (master switch)", master, color = p.yellow) { on ->
+            scope.launch { app.prefs.setRemindersEnabled(on); dev.personalterminal.reminders.ReminderScheduler.reschedule(ctx) }
+        }
+        if (!access) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                Text("notifications are blocked for this app", color = p.red, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                TermButton("allow", color = p.red, onClick = {
+                    if (android.os.Build.VERSION.SDK_INT >= 33) permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    else runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)) }
+                })
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text("# habits", color = p.fgDim, style = MaterialTheme.typography.labelSmall)
+        NotifLine("habit reminders", "\"time to do it\" at each habit's own time (habit edit)", n.habitReminders, master) { update { it.copy(habitReminders = !it.habitReminders) } }
+        NotifLine("evening check-in", "\"did you do X today?\" for habits with check-in on · done / skip buttons", n.habitCheckIn, master,
+            minutes = n.checkInMinutes, onMinutes = { m -> update { it.copy(checkInMinutes = m) } }) { update { it.copy(habitCheckIn = !it.habitCheckIn) } }
+        NotifLine("streak at risk", "one notice when a streak ≥ ${n.streakRiskMinStreak} days is still open in the evening", n.streakRisk, master,
+            minutes = n.streakRiskMinutes, onMinutes = { m -> update { it.copy(streakRiskMinutes = m) } }) { update { it.copy(streakRisk = !it.streakRisk) } }
+        if (n.streakRisk && master) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 28.dp)) {
+            Text("min streak ", color = p.fgDim, style = MaterialTheme.typography.labelSmall)
+            Stepper(n.streakRiskMinStreak, { v -> update { it.copy(streakRiskMinStreak = v) } }, min = 1, max = 60, suffix = "d", color = p.yellow)
+        }
+        NotifLine("weekly review", "sunday evening: review --week is ready", n.weeklyReview, master,
+            minutes = n.weeklyReviewMinutes, onMinutes = { m -> update { it.copy(weeklyReviewMinutes = m) } }) { update { it.copy(weeklyReview = !it.weeklyReview) } }
+        Spacer(Modifier.height(6.dp))
+        Text("# watches", color = p.fgDim, style = MaterialTheme.typography.labelSmall)
+        NotifLine("log today's watch", "if nothing is on the wrist yet · suggests `watch next` with a one-tap \"wear it\"", n.wearLog, master,
+            minutes = n.wearLogMinutes, onMinutes = { m -> update { it.copy(wearLogMinutes = m) } }) { update { it.copy(wearLog = !it.wearLog) } }
+        NotifLine("service due", "when a watch's service interval is within 30 days (at most weekly per watch)", n.watchService, master) { update { it.copy(watchService = !it.watchService) } }
+        Spacer(Modifier.height(6.dp))
+        Text("# timer", color = p.fgDim, style = MaterialTheme.typography.labelSmall)
+        NotifLine("focus / break finished", "sound + heads-up when a pomodoro phase ends (the live countdown itself always stays)", n.timerAlerts, true) { update { it.copy(timerAlerts = !it.timerAlerts) } }
+        Spacer(Modifier.height(8.dp))
+        Text("quiet hours:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("from ", color = p.fgDim, style = MaterialTheme.typography.bodySmall)
+            Stepper(settings.quietStartMin / 60, { scope.launch { app.prefs.setQuietHours(it * 60, settings.quietEndMin); dev.personalterminal.reminders.ReminderScheduler.reschedule(ctx) } }, min = 0, max = 23, suffix = ":00", color = p.yellow)
+            Spacer(Modifier.width(10.dp))
+            Text("to ", color = p.fgDim, style = MaterialTheme.typography.bodySmall)
+            Stepper(settings.quietEndMin / 60, { scope.launch { app.prefs.setQuietHours(settings.quietStartMin, it * 60); dev.personalterminal.reminders.ReminderScheduler.reschedule(ctx) } }, min = 0, max = 23, suffix = ":00", color = p.yellow)
+        }
+        Comment(if (settings.hasQuietHours) "anything scheduled inside this window is dropped, not delayed" else "same start and end = no quiet hours")
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text(nextSlot?.let { "next: $it" } ?: if (master) "next: nothing scheduled" else "next: —", color = p.fgDim, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+            TermButton("test", color = p.fgDim, enabled = master && access, onClick = { scope.launch { say(dev.personalterminal.reminders.ReminderScheduler.sendTest(ctx)) } })
+        }
+        Comment("per-habit times live in `habit edit` · `remind stretch 07:30` and `remind stretch checkin on` work from the prompt")
+    }
+}
+
+/** `[✓] label            18:00` with a tap-to-toggle checkbox and an optional time stepper (15-minute steps). */
+@Composable
+private fun NotifLine(label: String, hint: String, on: Boolean, enabled: Boolean, minutes: Int? = null, onMinutes: ((Int) -> Unit)? = null, onToggle: () -> Unit) {
+    val p = Term.palette
+    val active = on && enabled
+    Column(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable(enabled = enabled) { onToggle() }) {
+            Text(if (on) "[✓]" else "[ ]", color = if (active) p.green else p.fgDim, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(8.dp))
+            Text(label, color = if (enabled) p.fg else p.fgDim, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            if (minutes != null && onMinutes != null) {
+                Text("[-]", color = if (active) p.yellow else p.fgDim, style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.clickable(enabled = active) { onMinutes((minutes - 15 + 1440) % 1440) }.padding(horizontal = 4.dp))
+                Text("%02d:%02d".format(minutes / 60, minutes % 60), color = if (active) p.fg else p.fgDim, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                Text("[+]", color = if (active) p.yellow else p.fgDim, style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.clickable(enabled = active) { onMinutes((minutes + 15) % 1440) }.padding(horizontal = 4.dp))
+            }
+        }
+        Text(hint, color = p.fgDim, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 28.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }

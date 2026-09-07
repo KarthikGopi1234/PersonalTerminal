@@ -68,6 +68,12 @@ data class Habit(
     @ColumnInfo(defaultValue = "0") val breakMinutes: Int = 0,
     /** Health Connect metric that auto-fills this habit ("" = none). See [dev.personalterminal.health.HealthMetric]. */
     @ColumnInfo(defaultValue = "''") val healthMetric: String = "",
+    /**
+     * Evening check-in: at the global check-in time the app asks "did you do this today?" if the habit
+     * is still unlogged (not done, not skipped). Independent of [reminderMinutes], which is the
+     * "time to do it" nudge.
+     */
+    @ColumnInfo(defaultValue = "0") val checkIn: Boolean = false,
 )
 
 /** Reminder time as a LocalTime, or null when no reminder is set. */

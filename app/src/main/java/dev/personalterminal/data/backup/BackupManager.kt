@@ -13,6 +13,7 @@ import dev.personalterminal.data.db.FocusSession
 import dev.personalterminal.data.db.WatchService
 import dev.personalterminal.data.db.AccuracyReading
 import dev.personalterminal.data.db.Strap
+import dev.personalterminal.data.prefs.NotificationPrefs
 import dev.personalterminal.data.prefs.Settings
 import dev.personalterminal.data.prefs.UserPrefs
 import dev.personalterminal.data.repo.WatchRepository
@@ -72,12 +73,35 @@ data class BackupSettings(
     val remindersEnabled: Boolean = true,
     val crtEffect: Boolean = false,
     val accessibilityMode: Boolean = false,
+    val notifications: BackupNotifications? = null,
 ) {
     companion object {
         fun from(s: Settings) = BackupSettings(
             s.themeName, s.themeMode.name, s.username, s.hostname, s.pomodoroFocusMin, s.pomodoroBreakMin, s.pomodoroLongBreakMin,
             s.fontName, s.customPaletteJson, s.quietStartMin, s.quietEndMin, s.remindersEnabled, s.crtEffect, s.accessibilityMode,
+            BackupNotifications.from(s.notifications),
         )
+    }
+}
+
+@Serializable
+data class BackupNotifications(
+    val habitReminders: Boolean = true,
+    val habitCheckIn: Boolean = true,
+    val checkInMinutes: Int = 20 * 60,
+    val wearLog: Boolean = false,
+    val wearLogMinutes: Int = 9 * 60,
+    val watchService: Boolean = true,
+    val timerAlerts: Boolean = true,
+    val streakRisk: Boolean = true,
+    val streakRiskMinutes: Int = 21 * 60,
+    val streakRiskMinStreak: Int = 3,
+    val weeklyReview: Boolean = false,
+    val weeklyReviewMinutes: Int = 18 * 60,
+) {
+    fun toPrefs() = NotificationPrefs(habitReminders, habitCheckIn, checkInMinutes, wearLog, wearLogMinutes, watchService, timerAlerts, streakRisk, streakRiskMinutes, streakRiskMinStreak, weeklyReview, weeklyReviewMinutes)
+    companion object {
+        fun from(n: NotificationPrefs) = BackupNotifications(n.habitReminders, n.habitCheckIn, n.checkInMinutes, n.wearLog, n.wearLogMinutes, n.watchService, n.timerAlerts, n.streakRisk, n.streakRiskMinutes, n.streakRiskMinStreak, n.weeklyReview, n.weeklyReviewMinutes)
     }
 }
 
@@ -240,6 +264,7 @@ class BackupManager(
         if (p.settings.customPaletteJson.isNotBlank()) prefs.setCustomPalette(p.settings.customPaletteJson)
         prefs.setQuietHours(p.settings.quietStartMin, p.settings.quietEndMin)
         prefs.setRemindersEnabled(p.settings.remindersEnabled)
+        p.settings.notifications?.let { prefs.setNotifications(it.toPrefs()) }
         prefs.setCrt(p.settings.crtEffect)
         prefs.setAccessibilityMode(p.settings.accessibilityMode)
     }
