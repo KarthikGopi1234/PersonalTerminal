@@ -26,6 +26,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import dev.personalterminal.PersonalTerminalApp
 import dev.personalterminal.data.db.HabitType
+import dev.personalterminal.data.db.checklistItems
+import dev.personalterminal.data.db.hasItem
 import dev.personalterminal.domain.Schedule
 import dev.personalterminal.domain.Streaks
 import dev.personalterminal.ui.components.AsciiProgress
@@ -85,6 +87,22 @@ fun HabitDetailScreen(app: PersonalTerminalApp, nav: NavHostController, habitId:
                     Text(if (todayLog?.completed == true) "[✓] done" else "[ ] not yet", color = if (todayLog?.completed == true) color else p.fg, style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.weight(1f))
                     TermButton(if (todayLog?.completed == true) "undo" else "mark done", color = color, onClick = { scope.launch { app.habits.toggle(h.id, today) } })
+                }
+                h.type == HabitType.CHECKLIST -> Column {
+                    h.checklistItems.forEachIndexed { i, item ->
+                        val on = todayLog?.hasItem(i) == true
+                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { scope.launch { app.habits.toggleItem(h.id, i, today) } }.padding(vertical = 3.dp)) {
+                            Text(if (on) "[✓]" else "[ ]", color = if (on) color else p.fgDim, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.width(8.dp))
+                            Text(item, color = if (on) p.fgDim else p.fg, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        AsciiProgress(fraction = value.toFloat() / h.target.coerceAtLeast(1), width = 20, color = color, label = "${value}/${h.target}")
+                        Spacer(Modifier.weight(1f))
+                        TermButton(if (todayLog?.completed == true) "clear all" else "tick all", color = color, onClick = { scope.launch { app.habits.toggle(h.id, today) } })
+                    }
                 }
                 h.type == HabitType.COUNTER -> Column {
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
@@ -161,7 +179,8 @@ fun HabitDetailScreen(app: PersonalTerminalApp, nav: NavHostController, habitId:
             KeyValue("total completions", "${streak.completions}")
             KeyValue("shielded days", "${streak.shieldedDays}", valueColor = p.cyan)
             KeyValue("schedule", Schedule.describe(h) + if (h.negative) " · avoid" else "")
-            if (h.type != HabitType.CHECKBOX) KeyValue("target", "${h.target} ${h.unit}".trim())
+            if (h.type == HabitType.CHECKLIST) KeyValue("items", h.checklistItems.joinToString(" · "))
+            else if (h.type != HabitType.CHECKBOX) KeyValue("target", "${h.target} ${h.unit}".trim())
             if (h.reminderMinutes >= 0) KeyValue("reminder", "%02d:%02d".format(h.reminderMinutes / 60, h.reminderMinutes % 60))
             val skips = data.logs.count { it.skipped }
             if (skips > 0) KeyValue("skipped days", "$skips")

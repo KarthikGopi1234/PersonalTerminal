@@ -6,13 +6,13 @@
 
 ## What it does
 
-- **Habits** — checkbox, counter (`5/8 cups`), timer and *avoid* modes (`no sugar`: clean days grow the streak, a slip breaks it); routines with daily / weekly / custom schedules; 22 templates; per-habit reminders plus an evening *check-in* ("did you do X today?" with done / skip buttons), streak-at-risk notices and quiet hours; skip-with-reason, completion notes and mood.
-- **Streaks & shields** — earned streak freezes protect a chain after a missed day; skips bridge it for free.
-- **Command line** — a real prompt on Today: `done stretch`, `add 2 water`, `timer 25 focus`, `wear speedy`, `skip run -- sick`, `remind read 21:00`, `watch next`, `help`.
+- **Habits** — checkbox, counter (`5/8 cups`), timer, *checklist* (`pack gym bag` → shoes, towel, bottle…) and *avoid* modes (`no sugar`: clean days grow the streak, a slip breaks it); routines with daily / weekly / custom schedules, or Today grouped by time of day; 22 templates; per-habit reminders plus an evening *check-in* ("did you do X today?" with done / skip buttons), streak-at-risk notices and quiet hours; skip-with-reason, completion notes and mood.
+- **Streaks, shields & insurance** — earned streak freezes protect a chain after a missed day; skips bridge it for free; *insurance rules* auto-skip travel, sick leave or weekly rest days (`away travel 3d` … `back`).
+- **Command line** — a real prompt on Today: `done stretch`, `add 2 water`, `tick gym bag towel`, `timer 25 focus`, `wear speedy`, `skip run -- sick`, `away travel 3d`, `remind read 21:00`, `watch next`, `help`.
 - **Focus** — pomodoro with per-habit intervals, stopwatch mode, optional Do-Not-Disturb, session history on its own heatmap, Quick Settings tile, live countdown notification (Android 16 Live Update).
-- **Insights** — GitHub-style heatmap, XP and levels, weekly review as a shareable monospace card, `man achievements`, per-habit heatmaps and cross-habit correlations.
+- **Insights** — GitHub-style heatmap, XP and levels, weekly review and `review --year` as shareable monospace cards, `man achievements`, per-habit heatmaps and cross-habit correlations.
 - **Widgets** — tick habits off from the home screen (today list), plus status and timer widgets; app shortcuts; Tasker / adb intent API; Health Connect auto-completion.
-- **Watch tracker** — photograph today's watch, an optional daily "which watch today?" notice with a one-tap *wear it*, collection stats (wear share, neglected, cost per wear), service log with reminders, accuracy / drift, strap library, `watch next` rotation suggester, purchase & valuation, CSV export.
+- **Watch tracker** — photograph today's watch, an optional daily "which watch today?" notice with a one-tap *wear it*, a watch-box grid colour-coded by days since worn, "on this day" wrist-shot memories on the timeline, collection stats (wear share, neglected, cost per wear), service log with reminders, accuracy / drift, strap library, `watch next` rotation suggester, purchase & valuation, CSV export.
 - **Backup** — automatic Google Drive backups (optionally AES-256 encrypted), restore on first launch, local export/import, importers for Loop Habit Tracker and Habitica.
 - **Notifications, your way** — every notification the app can send (habit reminders, check-in, streak at risk, weekly review, wear log, service due, timer alerts) has its own switch and time under settings › notifications, behind one master switch and shared quiet hours.
 - **Terminal feel** — Dracula, Nord, Solarized, Gruvbox, Monokai, Catppuccin, Matrix or an imported colour scheme · light & dark · JetBrains Mono / Fira Code / Roboto Mono · CRT shader · tablet split panes · accessibility mode.
@@ -39,9 +39,13 @@
 |:-:|:-:|:-:|:-:|
 | <img src="screenshots/17-sessions.png" width="200" alt="Focus session history"> | <img src="screenshots/18-watch-stats.png" width="200" alt="Collection stats and watch next"> | <img src="screenshots/19-straps.png" width="200" alt="Strap library"> | <img src="screenshots/20-habit-edit.png" width="200" alt="Habit edit with reminder and avoid mode"> |
 
-| Journal | CRT · Matrix | | |
+| Journal | CRT · Matrix | Today by time of day | Checklist habit |
 |:-:|:-:|:-:|:-:|
-| <img src="screenshots/21-journal.png" width="200" alt="Journal of notes and moods"> | <img src="screenshots/22-crt-matrix.png" width="200" alt="CRT shader with the Matrix theme"> | | |
+| <img src="screenshots/21-journal.png" width="200" alt="Journal of notes and moods"> | <img src="screenshots/22-crt-matrix.png" width="200" alt="CRT shader with the Matrix theme"> | <img src="screenshots/23-today-sections.png" width="200" alt="Today grouped into morning, afternoon and evening"> | <img src="screenshots/24-checklist-edit.png" width="200" alt="Editing a checklist habit"> |
+
+| Watch box | `review --year` | Streak insurance | |
+|:-:|:-:|:-:|:-:|
+| <img src="screenshots/25-watch-box.png" width="200" alt="Watch box grid colour-coded by days since worn"> | <img src="screenshots/26-year-review.png" width="200" alt="Year in review"> | <img src="screenshots/27-streak-insurance.png" width="200" alt="Streak insurance rules"> | |
 
 Screenshots are rendered from the real screens with demo data by `./gradlew screenshots` (Robolectric, no device needed)
 and double as the golden images for `./gradlew verifyScreenshots`, which CI runs on every push.

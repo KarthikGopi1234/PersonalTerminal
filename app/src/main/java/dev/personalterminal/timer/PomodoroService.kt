@@ -78,7 +78,12 @@ class PomodoroService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        prefsJob = scope.launch { PersonalTerminalApp.get(this@PomodoroService).prefs.settings.collect { alertsEnabled = it.notifications.timerAlerts } }
+        prefsJob = scope.launch {
+            PersonalTerminalApp.get(this@PomodoroService).prefs.settings.collect {
+                alertsEnabled = it.notifications.timerAlerts
+                if (compact != it.compactLiveUpdate) { compact = it.compactLiveUpdate; if (_state.value.phase != Phase.IDLE) updateNotification() }
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -119,6 +124,8 @@ class PomodoroService : Service() {
     private var config = Config(25, 5, 15)
     /** Mirrors `settings.notifications.timerAlerts` (kept fresh while the service lives). */
     @Volatile private var alertsEnabled = true
+    /** Mirrors `settings.compactLiveUpdate`. */
+    @Volatile private var compact = true
 
     private fun startPhase(phase: Phase, habitId: Long = _state.value.habitId, habitName: String = _state.value.habitName) {
         val minutes = when (phase) {
@@ -275,10 +282,12 @@ class PomodoroService : Service() {
             s.phase == Phase.FOCUS || s.isStopwatch -> "▶"
             else -> "☕"
         }
-        val title = "$phaseLabel $glyph ${s.clock}" + if (!s.running) " (paused)" else ""
+        // Compact mode keeps the promoted surface (island / chip) to icon + time: the title *is* the
+        // countdown, everything else moves to the second line which those surfaces don't show.
+        val title = if (compact) (if (s.running) s.clock else "${s.clock} ‖") else "$phaseLabel $glyph ${s.clock}" + if (!s.running) " (paused)" else ""
         val bar = if (s.isStopwatch) "elapsed" else asciiBar(s.fraction, 16)
         val text = buildString {
-            append(bar)
+            if (compact) { append(phaseLabel); if (!s.running) append(" · paused") } else append(bar)
             if (s.habitName.isNotBlank()) append("  ").append(s.habitName)
             if (s.cycle > 0) append("  🍅×").append(s.cycle)
         }
@@ -296,7 +305,7 @@ class PomodoroService : Service() {
         val style = NotificationCompat.ProgressStyle()
             .setProgressSegments(listOf(NotificationCompat.ProgressStyle.Segment(s.totalSeconds.coerceAtLeast(1)).setColor(accent)))
             .setProgress(elapsed)
-            .setStyledByProgress(true)
+            .setStyledByProgress(!compact) // compact: no coloured fill, just the thin track
 
         val b = NotificationCompat.Builder(this, PersonalTerminalApp.CHANNEL_TIMER)
             .setSmallIcon(R.drawable.ic_notification)

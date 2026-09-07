@@ -9,7 +9,22 @@ import androidx.room.PrimaryKey
 import kotlinx.serialization.Serializable
 
 /** How a habit is tracked. */
-enum class HabitType { CHECKBOX, COUNTER, TIMER }
+enum class HabitType { CHECKBOX, COUNTER, TIMER, CHECKLIST }
+
+/** Section of the day a habit belongs to on the Today screen. */
+enum class TimeOfDay(val label: String, val glyph: String) {
+    MORNING("morning", "☼"), AFTERNOON("afternoon", "☀"), EVENING("evening", "☾"), ANY("anytime", "∞");
+
+    companion object {
+        fun of(name: String): TimeOfDay = entries.firstOrNull { it.name.equals(name, true) } ?: ANY
+        /** Section for a clock time: morning < 12:00 ≤ afternoon < 17:00 ≤ evening. */
+        fun at(minuteOfDay: Int): TimeOfDay = when {
+            minuteOfDay < 12 * 60 -> MORNING
+            minuteOfDay < 17 * 60 -> AFTERNOON
+            else -> EVENING
+        }
+    }
+}
 
 /** Which days a habit is scheduled for. */
 enum class ScheduleType { DAILY, WEEKLY, SPECIFIC_DAYS }
@@ -74,7 +89,26 @@ data class Habit(
      * "time to do it" nudge.
      */
     @ColumnInfo(defaultValue = "0") val checkIn: Boolean = false,
+    /** Checklist habits: sub-items, newline separated (see [checklistItems]). */
+    @ColumnInfo(defaultValue = "''") val checklist: String = "",
+    /** Today-screen section: MORNING / AFTERNOON / EVENING / ANY (see [TimeOfDay]); "" = ANY. */
+    @ColumnInfo(defaultValue = "''") val timeOfDay: String = "",
 )
+
+/** Sub-items of a checklist habit (empty for other types). */
+val Habit.checklistItems: List<String>
+    get() = if (type != HabitType.CHECKLIST) emptyList() else checklist.split('\n').map { it.trim() }.filter { it.isNotEmpty() }
+
+/**
+ * Section the habit shows under when Today is grouped by time of day: the explicit choice, else
+ * inferred from the reminder time, else [TimeOfDay.ANY].
+ */
+val Habit.section: TimeOfDay
+    get() = when {
+        timeOfDay.isNotBlank() -> TimeOfDay.of(timeOfDay)
+        reminderMinutes >= 0 -> TimeOfDay.at(reminderMinutes)
+        else -> TimeOfDay.ANY
+    }
 
 /** Reminder time as a LocalTime, or null when no reminder is set. */
 val Habit.reminderTime: java.time.LocalTime?
@@ -109,7 +143,47 @@ data class HabitLog(
     @ColumnInfo(defaultValue = "''") val note: String = "",
     /** Mood 1 (awful) … 5 (great); 0 = not recorded. */
     @ColumnInfo(defaultValue = "0") val mood: Int = 0,
+    /** Checklist habits: bitmask of ticked sub-items (bit i = item i). `value` is the popcount. */
+    @ColumnInfo(defaultValue = "0") val items: Long = 0L,
+    /**
+     * Streak-insurance: id of the [SkipRule] that auto-skipped this day (0 = none). A log with a
+     * ruleId but `skipped = false` means the user overrode the rule for that day – it is left alone.
+     */
+    @ColumnInfo(defaultValue = "0") val ruleId: Long = 0L,
 )
+
+/**
+ * Streak insurance: a rule that automatically skips matching days so a chain survives travel, sick
+ * leave or rest days without spending a shield. Either a date range (open-ended when [toDay] is
+ * null – "away until I say I'm back") or a weekly pattern ([weekdayMask], bit 0 = Monday).
+ */
+@Serializable
+@Entity(tableName = "skip_rules")
+data class SkipRule(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    /** Shown as the skip reason on Today ("travel", "sick", "rest day"). */
+    val name: String,
+    /** [KIND_RANGE] or [KIND_WEEKLY]. */
+    val kind: String = KIND_RANGE,
+    val fromDay: Long? = null,
+    val toDay: Long? = null,
+    val weekdayMask: Int = 0,
+    /** Comma-separated habit ids; blank = every habit. */
+    val habitIds: String = "",
+    val enabled: Boolean = true,
+    val createdAt: Long = AppClock.clock.millis(),
+) {
+    companion object {
+        const val KIND_RANGE = "range"
+        const val KIND_WEEKLY = "weekly"
+    }
+}
+
+val SkipRule.habitIdSet: Set<Long> get() = habitIds.split(',').mapNotNull { it.trim().toLongOrNull() }.toSet()
+val SkipRule.isOpenEnded: Boolean get() = kind == SkipRule.KIND_RANGE && toDay == null
+
+/** Whether sub-item [index] of a checklist habit is ticked in this log. */
+fun HabitLog.hasItem(index: Int): Boolean = index in 0..62 && (items shr index) and 1L == 1L
 
 /** A streak shield that was consumed to bridge a missed day. */
 @Serializable

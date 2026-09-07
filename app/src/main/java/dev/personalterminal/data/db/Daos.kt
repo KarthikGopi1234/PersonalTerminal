@@ -85,6 +85,10 @@ interface HabitLogDao {
     @Query("SELECT * FROM habit_logs WHERE day = :day")
     fun observeForDay(day: Long): Flow<List<HabitLog>>
 
+    /** Logs written (or overridden) by streak-insurance rules. */
+    @Query("SELECT * FROM habit_logs WHERE ruleId != 0")
+    suspend fun getRuleLogs(): List<HabitLog>
+
     @Query("SELECT * FROM habit_logs WHERE day = :day")
     suspend fun getForDay(day: Long): List<HabitLog>
 
@@ -368,6 +372,30 @@ interface AccuracyDao {
     suspend fun deleteForWatch(watchId: Long)
 
     @Query("DELETE FROM watch_accuracy")
+    suspend fun deleteAll()
+}
+
+@Dao
+interface SkipRuleDao {
+    @Query("SELECT * FROM skip_rules ORDER BY enabled DESC, createdAt DESC")
+    fun observeAll(): Flow<List<SkipRule>>
+
+    @Query("SELECT * FROM skip_rules ORDER BY enabled DESC, createdAt DESC")
+    suspend fun getAll(): List<SkipRule>
+
+    @Query("SELECT * FROM skip_rules WHERE id = :id")
+    suspend fun getById(id: Long): SkipRule?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(rule: SkipRule): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(rules: List<SkipRule>)
+
+    @Query("DELETE FROM skip_rules WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    @Query("DELETE FROM skip_rules")
     suspend fun deleteAll()
 }
 

@@ -132,6 +132,15 @@ class ScreenshotSuite {
     @Test fun habitEdit() = shoot("20-habit-edit", Tab.HABITS) { nav -> HabitEditScreen(app, nav, habitId(name = "no sugar"), null) }
     @Test fun journal() = shoot("21-journal", Tab.HABITS) { nav -> JournalScreen(app, nav) }
     @Test fun crt() = shoot("22-crt-matrix", Tab.TODAY, theme = "matrix", crt = true) { nav -> TodayScreen(app, nav) }
+    @Test fun todaySections() {
+        // Today grouped by time of day (setting persisted, read by the screen itself).
+        runBlocking { app.prefs.setTodaySections(true) }
+        try { shoot("23-today-sections", Tab.TODAY, theme = "nord") { nav -> TodayScreen(app, nav) } } finally { runBlocking { app.prefs.setTodaySections(false) } }
+    }
+    @Test fun checklistEdit() = shoot("24-checklist-edit", Tab.HABITS) { nav -> HabitEditScreen(app, nav, habitId(name = "pack gym bag"), null) }
+    @Test fun watchBox() = shoot("25-watch-box", Tab.WATCH) { nav -> dev.personalterminal.ui.watch.WatchBoxScreen(app, nav) }
+    @Test fun yearReview() = shoot("26-year-review", Tab.PROFILE, theme = "gruvbox") { nav -> dev.personalterminal.ui.insights.YearReviewScreen(app, nav) }
+    @Test fun insurance() = shoot("27-streak-insurance", Tab.HABITS) { nav -> dev.personalterminal.ui.habits.SkipRulesScreen(app, nav) }
 
     @Suppress("UNCHECKED_CAST")
     private fun setTimerState(state: TimerState) {
@@ -165,11 +174,16 @@ class ScreenshotSuite {
                 }
             }
         }
-        // Let Room flows, Coil image loads and the boot/typing animations settle.
-        repeat(12) {
+        // Let Room flows, Coil image loads and the boot/typing animations settle. Room's suspend
+        // queries and Coil's decoding run on real background threads, so give them wall-clock time
+        // as well as virtual time – otherwise a heavy screen (year review) or the last thumbnail in a
+        // grid can still be in flight when the frame is captured.
+        repeat(16) {
             ShadowLooper.idleMainLooper()
             rule.mainClock.advanceTimeBy(250)
             rule.waitForIdle()
+            Thread.sleep(60)
+            ShadowLooper.idleMainLooper()
         }
         val view = rule.activity.window.decorView
         val bmp = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)

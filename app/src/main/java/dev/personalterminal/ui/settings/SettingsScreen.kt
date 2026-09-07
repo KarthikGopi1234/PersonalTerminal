@@ -206,6 +206,7 @@ fun SettingsScreen(app: PersonalTerminalApp, nav: NavHostController) {
                 }
             }
             Spacer(Modifier.height(4.dp))
+            ToggleLine("today: group by time of day (morning / afternoon / evening) instead of routine", settings.todaySections) { scope.launch { app.prefs.setTodaySections(it) } }
             ToggleLine("crt scanlines & glow", settings.crtEffect) { scope.launch { app.prefs.setCrt(it) } }
             ToggleLine("accessibility: bigger targets, higher contrast, no animations", settings.accessibilityMode) { scope.launch { app.prefs.setAccessibilityMode(it) } }
         }
@@ -243,6 +244,7 @@ fun SettingsScreen(app: PersonalTerminalApp, nav: NavHostController) {
             ToggleLine("do-not-disturb during focus" + if (!dndAccess) " (tap to grant access)" else "", settings.dndDuringFocus && dndAccess) { on ->
                 if (!dndAccess) runCatching { ctx.startActivity(dev.personalterminal.timer.FocusDnd.settingsIntent()) } else scope.launch { app.prefs.setDndDuringFocus(on) }
             }
+            ToggleLine("compact live update: icon + time left only (status chip / island)", settings.compactLiveUpdate) { scope.launch { app.prefs.setCompactLiveUpdate(it) } }
             Comment("per-habit focus/break lengths live in `habit edit` · quick settings tile + widget can start the timer")
         }
 

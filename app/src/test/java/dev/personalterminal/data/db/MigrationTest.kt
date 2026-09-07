@@ -27,7 +27,7 @@ class MigrationTest {
     val helper = MigrationTestHelper(InstrumentationRegistry.getInstrumentation(), AppDatabase::class.java, emptyList(), FrameworkSQLiteOpenHelperFactory())
 
     @Test
-    fun `1 to 3 keeps data and matches the exported schema`() {
+    fun `1 to 4 keeps data and matches the exported schema`() {
         helper.createDatabase(dbName, 1).apply {
             execSQL("INSERT INTO routines (id, name, icon, position, createdAt) VALUES (1, 'morning', '☼', 0, 1)")
             execSQL("INSERT INTO habits (id, name, type, target, unit, schedule, daysMask, timesPerWeek, routineId, color, position, archived, createdAt, notes) VALUES (1, 'stretch', 'CHECKBOX', 1, '', 'DAILY', 127, 3, 1, 'green', 0, 0, 1, '')")
@@ -36,25 +36,33 @@ class MigrationTest {
             execSQL("INSERT INTO wear_logs (id, watchId, day, photoPath, note, createdAt) VALUES (1, 1, 20000, NULL, '', 1)")
             close()
         }
-        // validateDroppedTables = true → any difference to 3.json fails the test
-        val db = helper.runMigrationsAndValidate(dbName, 3, true, AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+        // validateDroppedTables = true → any difference to 4.json fails the test
+        val db = helper.runMigrationsAndValidate(dbName, 4, true, AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
         db.query("SELECT negative, reminderMinutes, healthMetric, checkIn FROM habits WHERE id = 1").use { c ->
             assertTrue(c.moveToFirst()); assertEquals(0, c.getInt(0)); assertEquals(-1, c.getInt(1)); assertEquals("", c.getString(2)); assertEquals(0, c.getInt(3))
         }
-        db.query("SELECT skipped, note, mood FROM habit_logs").use { c -> assertTrue(c.moveToFirst()); assertEquals(0, c.getInt(0)); assertEquals("", c.getString(1)); assertEquals(0, c.getInt(2)) }
+        db.query("SELECT skipped, note, mood, items, ruleId FROM habit_logs").use { c -> assertTrue(c.moveToFirst()); assertEquals(0, c.getInt(0)); assertEquals("", c.getString(1)); assertEquals(0, c.getInt(2)); assertEquals(0L, c.getLong(3)); assertEquals(0L, c.getLong(4)) }
+        db.query("SELECT checklist, timeOfDay FROM habits WHERE id = 1").use { c -> assertTrue(c.moveToFirst()); assertEquals("", c.getString(0)); assertEquals("", c.getString(1)) }
+        db.query("SELECT COUNT(*) FROM skip_rules").use { c -> assertTrue(c.moveToFirst()); assertEquals(0, c.getInt(0)) }
         db.query("SELECT serviceIntervalMonths, currency, purchasePrice FROM watches").use { c -> assertTrue(c.moveToFirst()); assertEquals(0, c.getInt(0)); assertEquals("", c.getString(1)); assertTrue(c.isNull(2)) }
         db.query("SELECT strapId FROM wear_logs").use { c -> assertTrue(c.moveToFirst()); assertTrue(c.isNull(0)) }
         db.close()
 
         // And Room itself opens the migrated file happily with the real DAOs.
         val room = Room.databaseBuilder(ApplicationProvider.getApplicationContext(), AppDatabase::class.java, dbName)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3).allowMainThreadQueries().build()
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4).allowMainThreadQueries().build()
         runBlocking {
             assertEquals(1, room.habitDao().getAll().size)
-            room.habitDao().update(room.habitDao().getById(1)!!.copy(checkIn = true))
+            room.habitDao().update(room.habitDao().getById(1)!!.copy(checkIn = true, type = HabitType.CHECKLIST, checklist = "shoes\ntowel", timeOfDay = "MORNING"))
             assertTrue(room.habitDao().getById(1)!!.checkIn)
+            assertEquals(listOf("shoes", "towel"), room.habitDao().getById(1)!!.checklistItems)
+            assertEquals(TimeOfDay.MORNING, room.habitDao().getById(1)!!.section)
+            room.habitLogDao().upsert(HabitLog(1, 20002, 1, false, items = 0b10L))
+            assertTrue(room.habitLogDao().get(1, 20002)!!.hasItem(1))
             room.focusSessionDao().insert(FocusSession(habitId = 1, day = 20001, startedAt = 0, endedAt = 0, minutes = 25))
             assertEquals(25, room.focusSessionDao().getAll().single().minutes)
+            val id = room.skipRuleDao().insert(SkipRule(name = "travel", fromDay = 20010, toDay = null))
+            assertEquals("travel", room.skipRuleDao().getById(id)!!.name)
         }
         room.close()
     }
@@ -66,8 +74,24 @@ class MigrationTest {
             execSQL("INSERT INTO habits (id, name, type, target, unit, schedule, daysMask, timesPerWeek, routineId, color, position, archived, createdAt, notes, negative, reminderMinutes, focusMinutes, breakMinutes, healthMetric) VALUES (7, 'read', 'COUNTER', 20, 'pages', 'DAILY', 127, 3, NULL, 'yellow', 0, 0, 1, '', 0, 1260, 0, 0, '')")
             close()
         }
-        val db = helper.runMigrationsAndValidate(name, 3, true, AppDatabase.MIGRATION_2_3)
-        db.query("SELECT checkIn, reminderMinutes FROM habits WHERE id = 7").use { c -> assertTrue(c.moveToFirst()); assertEquals(0, c.getInt(0)); assertEquals(1260, c.getInt(1)) }
+        val db = helper.runMigrationsAndValidate(name, 4, true, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+        db.query("SELECT checkIn, reminderMinutes, checklist FROM habits WHERE id = 7").use { c -> assertTrue(c.moveToFirst()); assertEquals(0, c.getInt(0)); assertEquals(1260, c.getInt(1)); assertEquals("", c.getString(2)) }
+        db.close()
+    }
+
+    @Test
+    fun `3 to 4 adds checklist, time-of-day, items and skip rules`() {
+        val name = "migration-3-4.db"
+        helper.createDatabase(name, 3).apply {
+            execSQL("INSERT INTO habits (id, name, type, target, unit, schedule, daysMask, timesPerWeek, routineId, color, position, archived, createdAt, notes, negative, reminderMinutes, focusMinutes, breakMinutes, healthMetric, checkIn) VALUES (9, 'gym', 'CHECKBOX', 1, '', 'DAILY', 127, 3, NULL, 'red', 0, 0, 1, '', 0, -1, 0, 0, '', 1)")
+            execSQL("INSERT INTO habit_logs (habitId, day, value, completed, updatedAt, skipped, skipReason, note, mood) VALUES (9, 20000, 1, 1, 1, 0, '', 'felt great', 4)")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(name, 4, true, AppDatabase.MIGRATION_3_4)
+        db.query("SELECT checkIn, checklist, timeOfDay FROM habits WHERE id = 9").use { c -> assertTrue(c.moveToFirst()); assertEquals(1, c.getInt(0)); assertEquals("", c.getString(1)); assertEquals("", c.getString(2)) }
+        db.query("SELECT note, mood, items, ruleId FROM habit_logs WHERE habitId = 9").use { c -> assertTrue(c.moveToFirst()); assertEquals("felt great", c.getString(0)); assertEquals(4, c.getInt(1)); assertEquals(0L, c.getLong(2)); assertEquals(0L, c.getLong(3)) }
+        db.execSQL("INSERT INTO skip_rules (name, kind, fromDay, toDay, weekdayMask, habitIds, enabled, createdAt) VALUES ('rest day', 'weekly', NULL, NULL, 96, '', 1, 1)")
+        db.query("SELECT name, weekdayMask FROM skip_rules").use { c -> assertTrue(c.moveToFirst()); assertEquals("rest day", c.getString(0)); assertEquals(96, c.getInt(1)) }
         db.close()
     }
 }

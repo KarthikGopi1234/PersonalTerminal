@@ -57,6 +57,14 @@ data class Settings(
     val restoreOffered: Boolean = false,
     /** Which notifications the app may send (see [NotificationPrefs]). */
     val notifications: NotificationPrefs = NotificationPrefs(),
+    /**
+     * Compact Live Update: title = remaining time only, no progress bar / habit name / actions
+     * text in the promoted surface (status-bar chip, ColorOS "Live Alerts" island, One UI Now Bar).
+     * The full controls stay in the expanded notification.
+     */
+    val compactLiveUpdate: Boolean = true,
+    /** Today grouped by time of day (morning / afternoon / evening / anytime) instead of by routine. */
+    val todaySections: Boolean = false,
 ) {
     val prompt: String get() = "$username@$hostname"
     val hasQuietHours: Boolean get() = quietStartMin != quietEndMin
@@ -143,6 +151,8 @@ class UserPrefs(private val context: Context) {
         val N_STREAK_LEN = intPreferencesKey("n_streak_risk_len")
         val N_REVIEW = booleanPreferencesKey("n_weekly_review")
         val N_REVIEW_MIN = intPreferencesKey("n_weekly_review_min")
+        val COMPACT_LIVE = booleanPreferencesKey("compact_live_update")
+        val TODAY_SECTIONS = booleanPreferencesKey("today_sections")
     }
 
     val settings: Flow<Settings> = context.dataStore.data.map { p ->
@@ -189,6 +199,8 @@ class UserPrefs(private val context: Context) {
                 weeklyReview = p[Keys.N_REVIEW] ?: false,
                 weeklyReviewMinutes = p[Keys.N_REVIEW_MIN] ?: (18 * 60),
             ),
+            compactLiveUpdate = p[Keys.COMPACT_LIVE] ?: true,
+            todaySections = p[Keys.TODAY_SECTIONS] ?: false,
         )
     }
 
@@ -224,6 +236,8 @@ class UserPrefs(private val context: Context) {
     suspend fun setHealthConnect(v: Boolean) = context.dataStore.edit { it[Keys.HEALTH] = v }
     suspend fun setLastReviewDay(day: Long) = context.dataStore.edit { it[Keys.LAST_REVIEW] = day }
     suspend fun setRestoreOffered(v: Boolean) = context.dataStore.edit { it[Keys.RESTORE_OFFERED] = v }
+    suspend fun setCompactLiveUpdate(v: Boolean) = context.dataStore.edit { it[Keys.COMPACT_LIVE] = v }
+    suspend fun setTodaySections(v: Boolean) = context.dataStore.edit { it[Keys.TODAY_SECTIONS] = v }
     suspend fun setNotifications(n: NotificationPrefs) = context.dataStore.edit {
         it[Keys.N_HABIT] = n.habitReminders
         it[Keys.N_CHECKIN] = n.habitCheckIn; it[Keys.N_CHECKIN_MIN] = n.checkInMinutes

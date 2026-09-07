@@ -64,6 +64,7 @@ fun HabitsScreen(app: PersonalTerminalApp, nav: NavHostController) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TermButton("habit add", onClick = { nav.navigate(Routes.habitEdit()) }, modifier = Modifier.weight(1f))
                 TermButton("routines", onClick = { nav.navigate(Routes.ROUTINES) }, color = p.purple, modifier = Modifier.weight(1f))
+                TermButton("insurance", onClick = { nav.navigate(Routes.SKIP_RULES) }, color = p.cyan, modifier = Modifier.weight(1f))
             }
         }
         val s = summary ?: return@LazyColumn
@@ -88,7 +89,7 @@ fun HabitsScreen(app: PersonalTerminalApp, nav: NavHostController) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        when (h.type) { HabitType.CHECKBOX -> "[ ]"; HabitType.COUNTER -> "[#]"; HabitType.TIMER -> "[▶]" },
+                        when (h.type) { HabitType.CHECKBOX -> "[ ]"; HabitType.COUNTER -> "[#]"; HabitType.TIMER -> "[▶]"; HabitType.CHECKLIST -> "[≡]" },
                         color = color, style = MaterialTheme.typography.bodyLarge,
                     )
                     Spacer(Modifier.width(10.dp))

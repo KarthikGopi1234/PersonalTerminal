@@ -39,6 +39,8 @@ import androidx.navigation.NavHostController
 import dev.personalterminal.PersonalTerminalApp
 import dev.personalterminal.data.db.Habit
 import dev.personalterminal.data.db.HabitType
+import dev.personalterminal.data.db.TimeOfDay
+import dev.personalterminal.data.db.checklistItems
 import dev.personalterminal.data.db.ScheduleType
 import dev.personalterminal.domain.Schedule
 import dev.personalterminal.ui.components.Comment
@@ -76,6 +78,9 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
     var negative by remember { mutableStateOf(false) }
     var reminder by remember { mutableIntStateOf(-1) }
     var checkIn by remember { mutableStateOf(false) }
+    var items by remember { mutableStateOf(listOf<String>()) }
+    var newItem by remember { mutableStateOf("") }
+    var timeOfDay by remember { mutableStateOf("") }
     var focusMin by remember { mutableIntStateOf(0) }
     var breakMin by remember { mutableIntStateOf(0) }
     var healthMetric by remember { mutableStateOf("") }
@@ -85,7 +90,7 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
         if (habitId != 0L) app.habits.habit(habitId)?.let { h ->
             original = h; name = h.name; type = h.type; target = h.target; unit = h.unit; schedule = h.schedule
             daysMask = h.daysMask; timesPerWeek = h.timesPerWeek; selectedRoutine = h.routineId; color = h.color; notes = h.notes
-            negative = h.negative; reminder = h.reminderMinutes; checkIn = h.checkIn; focusMin = h.focusMinutes; breakMin = h.breakMinutes; healthMetric = h.healthMetric
+            negative = h.negative; reminder = h.reminderMinutes; checkIn = h.checkIn; items = h.checklistItems; timeOfDay = h.timeOfDay; focusMin = h.focusMinutes; breakMin = h.breakMinutes; healthMetric = h.healthMetric
         }
         loaded = true
     }
@@ -107,7 +112,7 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
             Text("type:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
             RadioRow(options = HabitType.entries, selected = type, onSelect = {
                 type = it
-                if (it == HabitType.CHECKBOX) target = 1
+                if (it == HabitType.CHECKBOX || it == HabitType.CHECKLIST) target = 1
                 else if (target <= 1) target = if (it == HabitType.TIMER) 25 else 8
                 if (it == HabitType.TIMER) unit = "min"
                 if (it != HabitType.CHECKBOX) negative = false
@@ -117,8 +122,32 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
                     HabitType.CHECKBOX -> "simple win: done / not done"
                     HabitType.COUNTER -> "count towards a daily target, e.g. 8 cups"
                     HabitType.TIMER -> "minutes of focus; use the pomodoro timer to log"
+                    HabitType.CHECKLIST -> "a list of steps; the habit is done when every item is ticked"
                 },
             )
+            if (type == HabitType.CHECKLIST) {
+                Spacer(Modifier.height(6.dp))
+                Text("items:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+                items.forEachIndexed { i, item ->
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                        Text("[ ]", color = p.fgDim, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.width(8.dp))
+                        Text(item, color = p.fg, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        Text("▲", color = if (i > 0) p.cyan else p.fgDim, style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.clickable(enabled = i > 0) { items = items.toMutableList().apply { add(i - 1, removeAt(i)) } }.padding(4.dp))
+                        Text("▼", color = if (i < items.lastIndex) p.cyan else p.fgDim, style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.clickable(enabled = i < items.lastIndex) { items = items.toMutableList().apply { add(i + 1, removeAt(i)) } }.padding(4.dp))
+                        Text("✕", color = p.red, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clickable { items = items.filterIndexed { j, _ -> j != i } }.padding(4.dp))
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    TermTextField(value = newItem, onValueChange = { newItem = it.take(40) }, placeholder = if (items.isEmpty()) "e.g. shoes, towel, bottle" else "another step", modifier = Modifier.weight(1f),
+                        imeAction = ImeAction.Done, onImeAction = { if (newItem.isNotBlank() && items.size < 20) { items = items + newItem.trim(); newItem = "" } })
+                    Spacer(Modifier.width(8.dp))
+                    TermButton("+ add", enabled = newItem.isNotBlank() && items.size < 20, onClick = { items = items + newItem.trim(); newItem = "" })
+                }
+                Comment(if (items.isEmpty()) "type an item and press add · commas split into several (up to 20)" else "${items.size} item${if (items.size > 1) "s" else ""} · tick them one by one on today")
+            }
             if (type == HabitType.CHECKBOX) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { negative = !negative }.padding(top = 6.dp, bottom = 2.dp)) {
                     Text(if (negative) "[✓]" else "[ ]", color = if (negative) p.red else p.fgDim, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
@@ -129,7 +158,7 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
             }
         }
 
-        if (type != HabitType.CHECKBOX) {
+        if (type == HabitType.COUNTER || type == HabitType.TIMER) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Column {
                     Text("target:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
@@ -166,6 +195,15 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
                 }
                 ScheduleType.DAILY -> {}
             }
+        }
+
+        Column {
+            Text("time of day:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 4.dp)) {
+                Chip(label = "auto", selected = timeOfDay.isBlank(), color = p.fgDim) { timeOfDay = "" }
+                TimeOfDay.entries.forEach { t -> Chip(label = "${t.glyph} ${t.label}", selected = timeOfDay == t.name, color = p.cyan) { timeOfDay = t.name } }
+            }
+            Comment(if (timeOfDay.isBlank()) "auto = from the reminder time, else anytime · groups the today screen when `sections` is on" else "shown under ${TimeOfDay.of(timeOfDay).label} on today")
         }
 
         Column {
@@ -233,7 +271,7 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
             }
         }
 
-        if (type != HabitType.CHECKBOX && settings.healthConnect) {
+        if ((type == HabitType.COUNTER || type == HabitType.TIMER) && settings.healthConnect) {
             Column {
                 Text("health connect:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
                 androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 4.dp)) {
@@ -268,16 +306,20 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
         Spacer(Modifier.height(4.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TermButton(
-                if (habitId == 0L) "create" else "save", filled = true, modifier = Modifier.weight(1f), enabled = name.isNotBlank(),
+                if (habitId == 0L) "create" else "save", filled = true, modifier = Modifier.weight(1f), enabled = name.isNotBlank() && (type != HabitType.CHECKLIST || items.isNotEmpty()),
                 onClick = {
                     scope.launch {
+                        val cleanItems = items.flatMap { it.split(',') }.map { it.trim() }.filter { it.isNotEmpty() }.take(20)
                         val h = (original ?: Habit(name = "")).copy(
-                            name = name.trim(), type = type, target = if (type == HabitType.CHECKBOX) 1 else target.coerceAtLeast(1),
+                            name = name.trim(), type = type,
+                            target = when (type) { HabitType.CHECKBOX -> 1; HabitType.CHECKLIST -> cleanItems.size.coerceAtLeast(1); else -> target.coerceAtLeast(1) },
                             unit = unit.trim(), schedule = schedule, daysMask = if (daysMask == 0) 127 else daysMask,
                             timesPerWeek = timesPerWeek, routineId = selectedRoutine, color = color, notes = notes.trim(),
                             negative = negative && type == HabitType.CHECKBOX, reminderMinutes = reminder, checkIn = checkIn,
                             focusMinutes = if (type == HabitType.TIMER) focusMin else 0, breakMinutes = if (type == HabitType.TIMER) breakMin else 0,
-                            healthMetric = if (type != HabitType.CHECKBOX) healthMetric else "",
+                            healthMetric = if (type == HabitType.COUNTER || type == HabitType.TIMER) healthMetric else "",
+                            checklist = if (type == HabitType.CHECKLIST) cleanItems.joinToString("\n") else "",
+                            timeOfDay = timeOfDay,
                         )
                         app.habits.saveHabit(h)
                         dev.personalterminal.reminders.ReminderScheduler.reschedule(app)

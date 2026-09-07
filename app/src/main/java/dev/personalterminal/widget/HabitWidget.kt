@@ -49,6 +49,8 @@ import androidx.glance.unit.ColorProvider
 import dev.personalterminal.MainActivity
 import dev.personalterminal.PersonalTerminalApp
 import dev.personalterminal.data.db.HabitType
+import dev.personalterminal.data.db.checklistItems
+import dev.personalterminal.data.db.hasItem
 import dev.personalterminal.domain.DaySummary
 import dev.personalterminal.domain.HabitStatus
 import dev.personalterminal.ui.theme.TerminalPalette
@@ -134,7 +136,7 @@ class HabitWidget : GlanceAppWidget() {
         val label = when {
             h.negative -> h.name
             h.type == HabitType.CHECKBOX -> h.name
-            h.type == HabitType.COUNTER -> "${h.name} ${hs.value}/${h.target}"
+            h.type == HabitType.COUNTER || h.type == HabitType.CHECKLIST -> "${h.name} ${hs.value}/${h.target}"
             else -> "${h.name} ${hs.value}/${h.target}m"
         }
         val box = when {
@@ -215,6 +217,12 @@ class ToggleHabitAction : ActionCallback {
             habit.negative -> app.habits.toggle(id)
             habit.type == HabitType.CHECKBOX -> app.habits.toggle(id)
             habit.type == HabitType.COUNTER -> app.habits.addValue(id, 1)
+            habit.type == HabitType.CHECKLIST -> {
+                // tick the first open sub-item (like `[+]` on a counter); the row completes with the last one
+                val log = app.db.habitLogDao().get(id, dev.personalterminal.domain.AppClock.today().toEpochDay())
+                val next = habit.checklistItems.indices.firstOrNull { log?.hasItem(it) != true }
+                if (next != null) app.habits.toggleItem(id, next) else app.habits.toggle(id)
+            }
             else -> app.habits.addValue(id, 5)
         }
         HabitWidget.refreshAll(context)

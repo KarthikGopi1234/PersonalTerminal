@@ -39,12 +39,13 @@ object DemoData {
         val work = db.routineDao().insert(Routine(name = "deep work", icon = "λ", position = 1))
         val evening = db.routineDao().insert(Routine(name = "evening", icon = "☾", position = 2))
 
-        val meditate = habits.saveHabit(Habit(name = "meditate", type = HabitType.TIMER, target = 10, unit = "min", routineId = morning, color = "purple", position = 0))
+        val meditate = habits.saveHabit(Habit(name = "meditate", type = HabitType.TIMER, target = 10, unit = "min", routineId = morning, color = "purple", position = 0, timeOfDay = "MORNING"))
         val water = habits.saveHabit(Habit(name = "drink water", type = HabitType.COUNTER, target = 8, unit = "cups", routineId = morning, color = "cyan", position = 1))
-        val stretch = habits.saveHabit(Habit(name = "stretch", type = HabitType.CHECKBOX, routineId = morning, color = "green", position = 2))
-        val focus = habits.saveHabit(Habit(name = "focus session", type = HabitType.TIMER, target = 50, unit = "min", routineId = work, color = "orange", position = 3))
-        val commit = habits.saveHabit(Habit(name = "commit code", type = HabitType.CHECKBOX, routineId = work, color = "green", position = 4, schedule = ScheduleType.SPECIFIC_DAYS, daysMask = 31))
-        val read = habits.saveHabit(Habit(name = "read", type = HabitType.COUNTER, target = 20, unit = "pages", routineId = evening, color = "yellow", position = 5))
+        val stretch = habits.saveHabit(Habit(name = "stretch", type = HabitType.CHECKBOX, routineId = morning, color = "green", position = 2, timeOfDay = "MORNING"))
+        val gymBag = habits.saveHabit(Habit(name = "pack gym bag", type = HabitType.CHECKLIST, routineId = morning, color = "cyan", position = 2, timeOfDay = "MORNING", checklist = "shoes\ntowel\nbottle\nheadphones"))
+        val focus = habits.saveHabit(Habit(name = "focus session", type = HabitType.TIMER, target = 50, unit = "min", routineId = work, color = "orange", position = 3, timeOfDay = "AFTERNOON"))
+        val commit = habits.saveHabit(Habit(name = "commit code", type = HabitType.CHECKBOX, routineId = work, color = "green", position = 4, schedule = ScheduleType.SPECIFIC_DAYS, daysMask = 31, timeOfDay = "AFTERNOON"))
+        val read = habits.saveHabit(Habit(name = "read", type = HabitType.COUNTER, target = 20, unit = "pages", routineId = evening, color = "yellow", position = 5, timeOfDay = "EVENING"))
         val journal = habits.saveHabit(Habit(name = "journal", type = HabitType.CHECKBOX, routineId = evening, color = "pink", position = 6, reminderMinutes = 21 * 60, checkIn = true))
         val workout = habits.saveHabit(Habit(name = "workout", type = HabitType.CHECKBOX, routineId = null, color = "red", position = 7, schedule = ScheduleType.WEEKLY, timesPerWeek = 3))
         val noSugar = habits.saveHabit(Habit(name = "no sugar", type = HabitType.CHECKBOX, routineId = null, color = "red", position = 8, negative = true,
@@ -63,6 +64,7 @@ object DemoData {
             if (did(0.85)) habits.setValue(meditate, 10 + rnd.nextInt(6), d)
             if (did(0.8)) habits.setValue(water, if (recent) 8 else 5 + rnd.nextInt(4), d)
             if (did(0.9)) habits.toggle(stretch, d)
+            if (did(0.8)) habits.toggle(gymBag, d)
             if (did(0.7) && d.dayOfWeek.value <= 5) habits.setValue(focus, 50 + rnd.nextInt(30), d)
             if (did(0.75) && d.dayOfWeek.value <= 5) habits.toggle(commit, d)
             if (did(0.65)) habits.setValue(read, 20 + rnd.nextInt(25), d)
@@ -93,7 +95,12 @@ object DemoData {
         habits.setValue(meditate, 10, today)
         habits.setValue(water, 5, today)
         habits.toggle(stretch, today)
+        habits.toggleItem(gymBag, 0, today)
+        habits.toggleItem(gymBag, 1, today)
         habits.setValue(focus, 25, today)
+        // Streak insurance: a rest-day rule for the weekend workout and a past trip.
+        habits.saveSkipRule(dev.personalterminal.data.db.SkipRule(name = "travel", fromDay = today.minusDays(30).toEpochDay(), toDay = today.minusDays(27).toEpochDay()), today)
+        habits.saveSkipRule(dev.personalterminal.data.db.SkipRule(name = "rest day", kind = dev.personalterminal.data.db.SkipRule.KIND_WEEKLY, weekdayMask = 64, habitIds = "$focus,$commit"), today)
 
         // Watches + wear log.
         val watches = app.watches
@@ -127,6 +134,11 @@ object DemoData {
             }
             i++
             w = w.plusDays(1)
+        }
+        // "On this day" memories: wrist shots 3, 6 and 12 months back (the rotation above covers 45 days).
+        listOf(3L to seiko, 6L to speedy, 12L to cartier).forEach { (months, id) ->
+            val day = today.minusMonths(months)
+            watches.logWear(id, day, photo(app, "memory_$months", 0xFF2A2E3A.toInt(), 0xFFBD93F9.toInt(), wrist = true), "")
         }
         habits.mutations.value = System.currentTimeMillis()
     }

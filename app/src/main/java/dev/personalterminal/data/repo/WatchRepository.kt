@@ -180,6 +180,30 @@ class WatchRepository(private val context: Context, private val db: AppDatabase)
         return pick.watch to reason
     }
 
+    // ------------------------------------------------------------------ memories
+
+    data class Memory(val log: WearLogWithWatch, val label: String, val monthsAgo: Int)
+
+    /**
+     * "On this day": wrist shots taken 1, 3, 6, 12, 24 … months before [today] (±[toleranceDays] so a
+     * memory is not lost because the exact day had no photo). One entry per horizon, newest first.
+     */
+    suspend fun memories(today: LocalDate = AppClock.today(), toleranceDays: Long = 3): List<Memory> {
+        val withPhoto = wearDao.getAll().filter { it.photoPath != null }
+        if (withPhoto.isEmpty()) return emptyList()
+        val byId = watchDao.getAll().associateBy { it.id }
+        val horizons = listOf(1, 3, 6, 12, 24, 36, 48, 60)
+        val out = mutableListOf<Memory>()
+        for (m in horizons) {
+            val anchor = today.minusMonths(m.toLong()).toEpochDay()
+            val pick = withPhoto.filter { kotlin.math.abs(it.day - anchor) <= toleranceDays }.minByOrNull { kotlin.math.abs(it.day - anchor) * 10 + (if (it.day == anchor) 0 else 1) } ?: continue
+            val w = byId[pick.watchId] ?: continue
+            val label = when (m) { 1 -> "1 month ago"; 12 -> "1 year ago"; 24 -> "2 years ago"; 36 -> "3 years ago"; 48 -> "4 years ago"; 60 -> "5 years ago"; else -> "$m months ago" }
+            if (out.none { it.log.log.id == pick.id }) out += Memory(WearLogWithWatch(pick, w), label, m)
+        }
+        return out
+    }
+
     // ------------------------------------------------------------------ service log
 
     fun observeServices(watchId: Long): Flow<List<WatchService>> = serviceDao.observeForWatch(watchId)

@@ -60,6 +60,10 @@ import java.time.LocalDate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import dev.personalterminal.automation.Commands
+import dev.personalterminal.data.db.TimeOfDay
+import dev.personalterminal.data.db.checklistItems
+import dev.personalterminal.data.db.hasItem
+import dev.personalterminal.data.db.section
 import dev.personalterminal.ui.components.TermTextField
 import java.time.format.DateTimeFormatter
 
@@ -143,14 +147,23 @@ fun TodayScreen(app: PersonalTerminalApp, nav: NavHostController) {
             }
         }
 
-        s.groups.forEach { group ->
+        // Either one block per routine (default) or one per time of day (settings › today sections).
+        data class Block(val key: String, val icon: String, val name: String, val color: androidx.compose.ui.graphics.Color, val habits: List<HabitStatus>, val current: Boolean = false)
+        val nowSection = TimeOfDay.at(AppClock.now().let { it.hour * 60 + it.minute })
+        val blocks: List<Block> = if (settings.todaySections) {
+            val bySection = s.all.groupBy { it.habit.section }
+            TimeOfDay.entries.mapNotNull { t -> bySection[t]?.let { Block("tod-${t.name}", t.glyph, t.label, if (t == nowSection && isToday) p.yellow else p.purple, it, current = t == nowSection && isToday) } }
+        } else s.groups.map { g -> Block("routine-${g.routine?.id ?: -1}", g.routine?.icon ?: ">", g.name, p.purple, g.habits) }
+
+        blocks.forEach { group ->
             val dueHabits = group.habits.filter { it.isDueToday }
             val offDay = group.habits.filter { !it.isDueToday }
             if (dueHabits.isEmpty() && offDay.isEmpty()) return@forEach
-            item(key = "routine-${group.routine?.id ?: -1}") {
+            item(key = group.key) {
                 Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("── ${group.routine?.icon ?: ">"} ${group.name} ", color = p.purple, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    Text("── ${group.icon} ${group.name} ", color = group.color, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                     Text("${dueHabits.count { it.completed }}/${dueHabits.size}", color = p.fgDim, style = MaterialTheme.typography.labelSmall)
+                    if (group.current) { Spacer(Modifier.width(6.dp)); Text("← now", color = p.yellow, style = MaterialTheme.typography.labelSmall) }
                     Spacer(Modifier.width(6.dp))
                     Box(Modifier.weight(1f).height(1.dp).background(p.border))
                 }
@@ -159,6 +172,7 @@ fun TodayScreen(app: PersonalTerminalApp, nav: NavHostController) {
                 HabitRow(
                     hs = hs,
                     onToggle = { scope.launch { app.habits.toggle(hs.habit.id, date) } },
+                    onToggleItem = { i -> scope.launch { app.habits.toggleItem(hs.habit.id, i, date) } },
                     onIncrement = { scope.launch { app.habits.addValue(hs.habit.id, 1, date) } },
                     onDecrement = { scope.launch { app.habits.addValue(hs.habit.id, -1, date) } },
                     onTimer = { nav.navigate(Routes.timer(hs.habit.id)) },
@@ -173,7 +187,7 @@ fun TodayScreen(app: PersonalTerminalApp, nav: NavHostController) {
                 )
             }
             if (offDay.isNotEmpty()) {
-                item(key = "off-${group.routine?.id ?: -1}") {
+                item(key = "off-${group.key}") {
                     Text(
                         "  # not scheduled today: " + offDay.joinToString(", ") { it.habit.name },
                         color = p.fgDim, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
@@ -251,6 +265,7 @@ fun HabitRow(
     onOpen: () -> Unit,
     onShield: (LocalDate) -> Unit,
     shieldsAvailable: Int,
+    onToggleItem: (Int) -> Unit = {},
     expanded: Boolean = false,
     onExpand: () -> Unit = {},
     onSkip: (String) -> Unit = {},
@@ -300,6 +315,7 @@ fun HabitRow(
             }
             when (h.type) {
                 HabitType.CHECKBOX -> {}
+                HabitType.CHECKLIST -> Text("${hs.value}/${h.checklistItems.size}", color = p.fg, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                 HabitType.COUNTER -> Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("[-]", color = if (hs.value > 0) color else p.fgDim, style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.clickable(enabled = hs.value > 0, onClick = onDecrement).padding(4.dp))
@@ -313,7 +329,19 @@ fun HabitRow(
                 }
             }
         }
-        if (h.type != HabitType.CHECKBOX) {
+        if (h.type == HabitType.CHECKLIST) {
+            // sub-items: `  [✓] shoes   [ ] towel` – each tap toggles one step
+            Spacer(Modifier.height(4.dp))
+            h.checklistItems.forEachIndexed { i, item ->
+                val on = hs.log?.hasItem(i) == true
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable(enabled = !hs.skipped) { onToggleItem(i) }.padding(start = 26.dp, top = 3.dp, bottom = 3.dp)) {
+                    BracketCheckbox(checked = on, color = color)
+                    Spacer(Modifier.width(8.dp))
+                    Text(item, color = if (on) p.fgDim else p.fg, textDecoration = if (on) TextDecoration.LineThrough else null,
+                        style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        } else if (h.type != HabitType.CHECKBOX) {
             Spacer(Modifier.height(4.dp))
             AsciiProgress(fraction = hs.fraction, width = 20, color = color, showPercent = true, label = h.unit.ifBlank { null })
         }

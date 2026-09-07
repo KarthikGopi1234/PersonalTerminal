@@ -3,8 +3,13 @@
 Ideas for where Personal Terminal can go next, grouped by theme and roughly ordered by
 value-for-effort inside each group. Effort: **S** = an evening, **M** = a weekend, **L** = a multi-week feature.
 
-**Status (0.3):** everything marked ✅ shipped in the 0.3 series – see the release notes and
+**Status (0.3.2):** everything marked ✅ has shipped – see the release notes and
 [docs/AUTOMATION.md](AUTOMATION.md) for the command line / intent API. Unmarked rows are still open.
+
+**Scope note.** Personal Terminal is a *personal-use* project that leans heavily on the ideas in
+Init Habits. It will not be published to any store and will not grow a Wear OS companion; rows that
+only made sense for a public product (store listing, localisation for other people, Wear OS tile)
+have been removed rather than left open.
 
 ## 1. Habit loop – make the daily check-in stickier
 
@@ -14,9 +19,10 @@ value-for-effort inside each group. Effort: **S** = an evening, **M** = a weeken
 | 1.2 ✅ | **Notes on a completion** (`why`, mood 1–5, a one-liner) shown in the habit log | Turns the log into a journal; pairs with the CLI aesthetic ("git commit -m") | S |
 | 1.3 ✅ | **Negative / "avoid" habits** (no sugar, no doom-scrolling) that count *clean days* and break on a slip | Common request in Init Habits-style apps; the streak engine already models gaps | M |
 | 1.4 ✅ | **Skip-with-reason** (`sick`, `travel`) that neither breaks nor extends the streak | Reduces "all-or-nothing" abandonment; complements shields | S |
-| 1.5 | **Time-of-day sections** (morning / afternoon / evening / any) instead of only routines | Today screen reads like a day plan | S |
+| 1.5 ✅ | **Time-of-day sections** (morning / afternoon / evening / any) instead of only routines – opt-in in settings, per-habit override, current section highlighted | Today screen reads like a day plan | S |
 | 1.6 ✅ | **Habit templates** (`habit add --from library`) with ~30 curated presets incl. units and targets | Faster onboarding | S |
-| 1.7 | **Sub-tasks / checklist habits** (pack gym bag → 4 items) | Routine = habits, habit = steps | M |
+| 1.7 ✅ | **Sub-tasks / checklist habits** (pack gym bag → 4 items) – tick items on Today, in the widget and with `tick <habit> <item>` | Routine = habits, habit = steps | M |
+| 1.8 ✅ | **Streak insurance rules**: auto-skip date ranges (`away travel 3d`, open-ended until `back`) or weekly rest days, per habit or global – the chain survives without spending a shield | Travel and sick days should not cost a 90-day streak | M |
 | 1.8 ✅ | **Evening check-in** per habit ("did you do X today?" with done / skip actions), **streak-at-risk** notice, **wear-log** notice, and a **per-notification settings matrix** (each kind switchable with its own time, one master switch, shared quiet hours) | Reminders nudge *before*; check-ins catch what was done but never logged – and nobody wants all of them | M |
 
 ## 2. Focus timer
@@ -28,8 +34,7 @@ value-for-effort inside each group. Effort: **S** = an evening, **M** = a weeken
 | 2.3 ✅ | **Custom intervals per habit** (25/5 vs 50/10) and *auto-start next phase* toggle | Power-user ergonomics | S |
 | 2.4 | **Ambient sounds / tick** (rain, brown noise, mechanical-keyboard clicks) with independent volume | Popular in pomodoro apps, fits the vibe | M |
 | 2.5 ✅ | **Do-Not-Disturb during focus** (request `ACCESS_NOTIFICATION_POLICY`) | Real focus protection | S |
-| 2.6 | **Wear OS tile / complication** showing remaining time; start/stop from the wrist | The watch tracker audience owns smartwatches too | L |
-| 2.7 | Live-Update polish: verify what ColorOS 16 needs for the island (a `ProgressStyle` with `setProgressTrackerIcon`? a `CallStyle`-like layout?) once OPPO documents it; currently the countdown lands in the shade but not the island on Find X9 Ultra | Vendor-specific; wait for documentation rather than guess | ? |
+| 2.7 ✅ | Live-Update polish for the ColorOS island: works once "live updates" is allowed for the app in system settings; a **compact live update** switch trims the notification to logo + time left so the island stays small | Vendor-specific | S |
 
 ## 3. Watch tracker
 
@@ -39,7 +44,8 @@ value-for-effort inside each group. Effort: **S** = an evening, **M** = a weeken
 | 3.2 ✅ | **Service & maintenance log** per watch (service date, cost, warranty until, strap changes) with a reminder when the service interval elapses | Watch owners track this in spreadsheets today | M |
 | 3.3 ✅ | **Accuracy tracking**: log "watch shows / reference time" pairs, compute s/day drift with a sparkline; optional atomic-clock sync via NTP | Mechanical-watch enthusiasts love this (see WatchCheck / Twixt) | M |
 | 3.4 ✅ | **Strap library**: straps as their own entity, log which strap was on which watch, gallery per combo | Very common collector behaviour | M |
-| 3.5 | **Watch box view**: grid of thumbnails coloured by dial, sortable by last worn / brand / size | Visual browse mode for bigger collections | S |
+| 3.5 ✅ | **Watch box view**: grid of thumbnails colour-coded by days since worn (green → red), sortable by neglect / wears / name, one-tap `wear` | Visual browse mode for bigger collections | S |
+| 3.6 ✅ | **"On this day" memories**: wrist shots from 1 / 3 / 6 / 12 … months ago on the timeline, tap → that day | The photo log becomes something you revisit | S |
 | 3.6 ✅ | **Rotation suggester** (`watch next`): proposes tomorrow's watch weighted toward neglected pieces and the day's habits (e.g. G-Shock on workout days) | Fun, tiny algorithm, uses both halves of the app | S |
 | 3.7 ✅ | **Purchase details & valuation**: price paid, date, box/papers, current estimate; collection total on the profile | Insurance / resale bookkeeping | S |
 | 3.8 ✅ | **Import / export CSV** of the collection and wear log | Data portability | S |
@@ -53,7 +59,7 @@ value-for-effort inside each group. Effort: **S** = an evening, **M** = a weeken
 | 4.2 ✅ | **Achievements / badges** rendered as man-page style entries (`STREAK(7)`, `PERFECT_WEEK(1)`) | Cheap dopamine layered on the XP system | S |
 | 4.3 ✅ | **Per-habit heatmap + best streak + completion trend** on the habit detail screen | Detail screen currently shows only the current streak | S |
 | 4.4 ✅ | **Correlations** ("you complete *read* 40 % more on days you *meditate*") | Small statistics, big "aha" | M |
-| 4.5 | **Year in review** (December): a scrolling terminal log of the year | Seasonal delight | M |
+| 4.5 ✅ | **Year in review** (`review --year`): completions, perfect days, best streaks, month sparkline, focus hours, most-worn watch – shareable card | Seasonal delight | M |
 
 ## 5. Widgets & system integration
 
@@ -86,20 +92,19 @@ value-for-effort inside each group. Effort: **S** = an evening, **M** = a weeken
 | 7.3 | **Conflict-free multi-device sync** (append-only log of events replayed on each device) | Real sync instead of last-writer-wins backup — big, only if a second device matters | L |
 | 7.4 ✅ | **Import from other apps** (Loop Habit Tracker CSV, Habitica, Streaks) | Lowers the switching cost | M |
 | 7.5 ✅ | **Room migrations test + schema CI check** and **Compose screenshot tests in CI** (the `screenshots` task already renders every screen; assert against golden PNGs) | Guard rails as the codebase grows | S |
-| 7.6 | **F-Droid / Play listing**, signed release keystore in CI secrets, Play Integrity-free (no Google dependency except optional Drive) | Distribution | M |
-| 7.7 | **Localisation** (string resources are already externalised; add de/es/fr/hi/ja) | — | S per language |
 
 ## Notes on the shipped items
 
-- **2.6 Wear OS tile** is *not* shipped: it needs a separate Wear module and a paired watch to test; the
-  phone-side pieces it would talk to (timer state flow, `TimerWidgetAction`, broadcast API) are in place.
 - **7.5** ships as `./gradlew verifyScreenshots` (golden PNGs in `screenshots/`, pixel diff with a 1.5 % tolerance,
-  diffs uploaded as a CI artifact) plus a Room migration test (1→2→3 against the exported schemas).
+  diffs uploaded as a CI artifact) plus a Room migration test (1→2→3→4 against the exported schemas).
+- **1.8 streak insurance** writes skip logs tagged with the rule id over a rolling window (14 days back,
+  60 ahead) on every launch, every daily worker run and every rule edit; deleting or ending a rule retracts only
+  the skips it created, and a day you completed or un-skipped by hand is never touched again.
 - **5.6 Health Connect** reads steps, exercise sessions, sleep sessions and hydration; the device needs the Health
   Connect app (Android 14 has it built in).
 
-## Suggested next three
+## Still open
 
-1. **Sub-task / checklist habits (1.7)** – the last habit-loop gap.
-2. **Wear OS tile (2.6)** – now that the timer has a public control surface.
+1. **Ambient sounds (2.4)** – rain / brown noise / keyboard clicks under the timer.
+2. **Wrist-shot camera frame (3.9)** – rule-of-thirds overlay and an EXIF stamp with the watch name.
 3. **Multi-device sync (7.3)** – encrypted backups + Drive folder give it a base to stand on.

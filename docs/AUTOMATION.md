@@ -13,11 +13,16 @@ skip <habit> -- reason    skip today (bridges streak)  unskip <habit>
 slip <habit>              log a slip on an avoid-habit note <habit> -- text  completion note
 mood <1-5> [habit]        mood for a habit             timer [min] [habit]  start a focus session
 timer stop|pause|resume   control the timer            stopwatch [habit]    count-up session
+tick <habit> <item|n>     tick / untick a checklist item (habit completes when all are ticked)
 wear <watch>              log today's watch            watch next           rotation suggestion
+watch box                 collection grid by neglect   watch stats          collection stats
 shield <habit>            repair the latest gap        habit add [template] new habit / from template
 remind <habit> 07:30      set / `off` the reminder     remind <habit> checkin on|off   evening check-in
 remind                    list reminders
-ls · status · review · man · insights · timeline · journal · settings
+away <reason> [3d | yyyy-mm-dd [yyyy-mm-dd]]           streak insurance: auto-skip a date range
+away <reason>             open-ended (until `back`)    away                 list rules
+back                      end every open-ended rule today
+ls · status · review · review year · man · insights · timeline · journal · settings
 theme <name> · dark · light · backup · help
 ```
 
@@ -57,8 +62,8 @@ Results are logged under the tag `PTAutomation`; the widget refreshes after ever
 
 ## Other entry points
 
-- **Widgets** – *today* (tap a row to tick / +1 / +5 min, header opens the app), *status*
-  (level, XP, streak, shields), *timer* (start / pause / stop).
+- **Widgets** – *today* (tap a row to tick / +1 / +5 min / tick the next checklist item, header
+  opens the app), *status* (level, XP, streak, shields), *timer* (start / pause / stop).
 - **Quick Settings tile** – "Focus timer": tap to start with the global pomodoro lengths, tap
   again to stop.
 - **App shortcuts** – long-press the icon: `timer`, `wear`, `habit add`, `review`.
@@ -67,3 +72,6 @@ Results are logged under the tag `PTAutomation`; the widget refreshes after ever
   `habit/42`, `wear/log`).
 - **Health Connect** – link a counter/timer habit to steps, exercise minutes, sleep hours or
   hydration in `habit edit`; the value is pulled hourly and on app start.
+- **Streak insurance** – rules are re-applied on every launch, by the daily reminder worker and after
+  each rule edit, over a window of 14 days back / 60 days ahead. Auto-skips show up on Today as
+  `[»] skipped: <reason>`; completing or un-skipping such a day by hand overrides the rule for that day.

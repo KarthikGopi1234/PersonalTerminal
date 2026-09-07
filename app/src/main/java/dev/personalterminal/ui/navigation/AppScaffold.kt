@@ -124,6 +124,9 @@ fun AppScaffold(app: PersonalTerminalApp, settings: Settings, startRoute: String
                 composable(Routes.SESSIONS) { SessionsScreen(app, nav) }
                 composable(Routes.STRAPS) { StrapsScreen(app, nav) }
                 composable(Routes.WATCH_STATS) { WatchStatsScreen(app, nav) }
+                composable(Routes.WATCH_BOX) { dev.personalterminal.ui.watch.WatchBoxScreen(app, nav) }
+                composable(Routes.SKIP_RULES) { dev.personalterminal.ui.habits.SkipRulesScreen(app, nav) }
+                composable(Routes.YEAR_REVIEW) { dev.personalterminal.ui.insights.YearReviewScreen(app, nav) }
                 composable(Routes.IMPORT) { ImportScreen(app, nav) }
                 composable(Routes.JOURNAL) { JournalScreen(app, nav) }
                 composable(Routes.HABIT_DETAIL, arguments = listOf(navArgument("id") { type = NavType.LongType })) {

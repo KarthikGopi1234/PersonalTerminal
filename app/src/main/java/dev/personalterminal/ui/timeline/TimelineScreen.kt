@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +46,7 @@ import dev.personalterminal.ui.components.TermButton
 import dev.personalterminal.ui.components.asciiBar
 import dev.personalterminal.ui.navigation.Routes
 import dev.personalterminal.ui.theme.Term
+import dev.personalterminal.data.db.displayName
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -65,6 +67,9 @@ fun TimelineScreen(app: PersonalTerminalApp, nav: NavHostController) {
     val wear by remember(month) { app.watches.observeWearRange(from, to) }.collectAsStateWithLifecycle(initialValue = emptyList())
     var selected by remember { mutableStateOf<LocalDate?>(null) }
 
+    var memories by remember { mutableStateOf<List<dev.personalterminal.data.repo.WatchRepository.Memory>>(emptyList()) }
+    val mutations by app.habits.mutations.collectAsStateWithLifecycle()
+    LaunchedEffect(mutations) { memories = runCatching { app.watches.memories(today) }.getOrDefault(emptyList()) }
     val habitById = remember(habits) { habits.associateBy { it.id } }
     val activeCount = habits.count { !it.archived }.coerceAtLeast(1)
     val completionsByDay = remember(logs) { logs.filter { it.completed }.groupBy { it.day } }
@@ -83,6 +88,28 @@ fun TimelineScreen(app: PersonalTerminalApp, nav: NavHostController) {
                 val canNext = month < YearMonth.from(today)
                 Text("${month.plusMonths(1).month.name.take(3).lowercase()} >", color = if (canNext) p.cyan else p.fgDim, style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.clickable(enabled = canNext) { month = month.plusMonths(1); selected = null }.padding(4.dp))
+            }
+        }
+        if (memories.isNotEmpty() && month == YearMonth.from(today)) item(key = "memories") {
+            // "On this day": wrist shots from 1 / 3 / 6 / 12 … months ago, tap → that day
+            dev.personalterminal.ui.components.TerminalPanel(title = "on this day", titleColor = p.pink) {
+                androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(memories, key = { it.log.log.id }) { m ->
+                        val d = LocalDate.ofEpochDay(m.log.log.day)
+                        Column(
+                            Modifier.width(120.dp).clickable { month = YearMonth.from(d); selected = d },
+                        ) {
+                            coil.compose.AsyncImage(
+                                model = app.watches.photoFile(m.log.log.photoPath!!), contentDescription = "${m.log.watch.displayName} ${m.label}",
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                modifier = Modifier.size(120.dp).clip(RoundedCornerShape(6.dp)),
+                            )
+                            Text(m.label, color = p.pink, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+                            Text(m.log.watch.displayName, color = p.fg, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(d.format(DateTimeFormatter.ofPattern("dd MMM yyyy")).lowercase(), color = p.fgDim, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
             }
         }
         item {

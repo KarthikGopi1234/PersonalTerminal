@@ -317,6 +317,7 @@ object ReminderScheduler {
 
 class ReminderWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
+        runCatching { (applicationContext as? dev.personalterminal.PersonalTerminalApp)?.habits?.applySkipRules() }
         runCatching { ReminderScheduler.fire(applicationContext) }
         runCatching { ReminderScheduler.reschedule(applicationContext) }
         return Result.success()

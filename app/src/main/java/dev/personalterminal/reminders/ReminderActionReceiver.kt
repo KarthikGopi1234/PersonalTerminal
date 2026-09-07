@@ -24,6 +24,7 @@ class ReminderActionReceiver : BroadcastReceiver() {
                         val habit = app.habits.habit(id) ?: return@launch
                         when (habit.type) {
                             HabitType.CHECKBOX -> if (habit.negative) app.habits.logSlip(id, slipped = false) else app.habits.toggle(id)
+                            HabitType.CHECKLIST -> if (!(app.habits.daySummary(AppClock.today()).all.firstOrNull { it.habit.id == id }?.completed ?: false)) app.habits.toggle(id)
                             HabitType.COUNTER -> app.habits.addValue(id, 1)
                             HabitType.TIMER -> app.habits.addValue(id, 5)
                         }

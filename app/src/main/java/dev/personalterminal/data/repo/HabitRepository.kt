@@ -7,6 +7,7 @@ import dev.personalterminal.data.db.Habit
 import dev.personalterminal.data.db.HabitLog
 import dev.personalterminal.data.db.HabitType
 import dev.personalterminal.data.db.HabitWithLogs
+import dev.personalterminal.data.db.checklistItems
 import dev.personalterminal.data.db.FocusSession
 import dev.personalterminal.data.db.Routine
 import dev.personalterminal.data.db.ScheduleType
@@ -16,7 +17,9 @@ import dev.personalterminal.domain.DaySummary
 import dev.personalterminal.domain.HabitStatus
 import dev.personalterminal.domain.Progression
 import dev.personalterminal.domain.RoutineGroup
+import dev.personalterminal.data.db.SkipRule
 import dev.personalterminal.domain.Schedule
+import dev.personalterminal.domain.SkipRules
 import dev.personalterminal.domain.StreakInfo
 import dev.personalterminal.domain.Streaks
 import kotlinx.coroutines.flow.Flow
@@ -37,6 +40,7 @@ class HabitRepository(private val db: AppDatabase) {
     private val routineDao = db.routineDao()
     private val xpDao = db.xpDao()
     private val sessionDao = db.focusSessionDao()
+    private val ruleDao = db.skipRuleDao()
 
     /** Emits whenever a mutation happened – lets the widget and other non-Flow consumers refresh. */
     val mutations = MutableStateFlow(0L)
@@ -133,6 +137,8 @@ class HabitRepository(private val db: AppDatabase) {
     // ------------------------------------------------------------------ habits
 
     suspend fun saveHabit(habit: Habit): Long {
+        @Suppress("NAME_SHADOWING")
+        val habit = if (habit.type == HabitType.CHECKLIST) habit.copy(target = habit.checklistItems.size.coerceAtLeast(1)) else habit
         val id = if (habit.id == 0L) habitDao.insert(habit.copy(position = habitDao.nextPosition()))
         else { habitDao.update(habit); habit.id }
         bump(); return id
@@ -165,9 +171,28 @@ class HabitRepository(private val db: AppDatabase) {
         val existing = logDao.get(habitId, epoch)
         val nowCompleted = !(existing?.completed ?: false)
         val value = if (nowCompleted) habit.target.coerceAtLeast(1) else 0
-        logDao.upsert(existing.carry(habitId, epoch, value, nowCompleted))
+        // checklist: completing the habit ticks every item, un-completing clears them
+        val items = if (habit.type == HabitType.CHECKLIST) (if (nowCompleted) allItemsMask(habit) else 0L) else existing?.items ?: 0L
+        logDao.upsert(existing.carry(habitId, epoch, value, nowCompleted, items))
         afterChange(habit, epoch, existing?.completed == true, nowCompleted, date)
     }
+
+    /** Checklist habits: tick / untick sub-item [index]; the habit completes when every item is ticked. */
+    suspend fun toggleItem(habitId: Long, index: Int, date: LocalDate = AppClock.today()) {
+        val habit = habitDao.getById(habitId) ?: return
+        val n = habit.checklistItems.size
+        if (habit.type != HabitType.CHECKLIST || index !in 0 until n) return
+        val epoch = date.toEpochDay()
+        val existing = logDao.get(habitId, epoch)
+        val mask = (existing?.items ?: 0L) xor (1L shl index)
+        val ticked = java.lang.Long.bitCount(mask and allItemsMask(habit))
+        val completed = ticked >= n
+        if (ticked == 0 && existing.isBare()) logDao.delete(habitId, epoch)
+        else logDao.upsert(existing.carry(habitId, epoch, ticked, completed, mask))
+        afterChange(habit, epoch, existing?.completed == true, completed, date)
+    }
+
+    private fun allItemsMask(habit: Habit): Long = habit.checklistItems.size.let { n -> if (n >= 63) -1L else (1L shl n) - 1 }
 
     /** Increment/decrement a counter or add minutes to a timer habit. */
     suspend fun addValue(habitId: Long, delta: Int, date: LocalDate = AppClock.today()) {
@@ -187,15 +212,16 @@ class HabitRepository(private val db: AppDatabase) {
         val existing = logDao.get(habitId, epoch)
         val v = value.coerceAtLeast(0)
         val completed = if (habit.type == HabitType.CHECKBOX) v > 0 else v >= habit.target.coerceAtLeast(1)
-        if (v == 0 && existing.isBare()) logDao.delete(habitId, epoch) else logDao.upsert(existing.carry(habitId, epoch, v, completed))
+        val items = if (habit.type == HabitType.CHECKLIST) (if (completed) allItemsMask(habit) else if (v == 0) 0L else existing?.items ?: 0L) else existing?.items ?: 0L
+        if (v == 0 && existing.isBare()) logDao.delete(habitId, epoch) else logDao.upsert(existing.carry(habitId, epoch, v, completed, items))
         afterChange(habit, epoch, existing?.completed == true, completed, date)
     }
 
     /** Keeps note / mood when the value changes; a new value always clears a skip. */
-    private fun HabitLog?.carry(habitId: Long, epoch: Long, value: Int, completed: Boolean) =
-        HabitLog(habitId, epoch, value, completed, note = this?.note ?: "", mood = this?.mood ?: 0)
+    private fun HabitLog?.carry(habitId: Long, epoch: Long, value: Int, completed: Boolean, items: Long = this?.items ?: 0L) =
+        HabitLog(habitId, epoch, value, completed, note = this?.note ?: "", mood = this?.mood ?: 0, items = items, ruleId = this?.ruleId ?: 0L)
 
-    private fun HabitLog?.isBare() = this == null || (note.isBlank() && mood == 0 && !skipped)
+    private fun HabitLog?.isBare() = this == null || (note.isBlank() && mood == 0 && !skipped && ruleId == 0L)
 
     // ------------------------------------------------------------------ skip / note / mood / avoid-habits
 
@@ -204,7 +230,7 @@ class HabitRepository(private val db: AppDatabase) {
         val habit = habitDao.getById(habitId) ?: return
         val epoch = date.toEpochDay()
         val existing = logDao.get(habitId, epoch)
-        logDao.upsert(HabitLog(habitId, epoch, 0, false, skipped = true, skipReason = reason.trim(), note = existing?.note ?: "", mood = existing?.mood ?: 0))
+        logDao.upsert(HabitLog(habitId, epoch, 0, false, skipped = true, skipReason = reason.trim(), note = existing?.note ?: "", mood = existing?.mood ?: 0, ruleId = existing?.ruleId ?: 0L))
         afterChange(habit, epoch, existing?.completed == true, false, date)
     }
 
@@ -213,7 +239,7 @@ class HabitRepository(private val db: AppDatabase) {
         val epoch = date.toEpochDay()
         val existing = logDao.get(habitId, epoch) ?: return
         if (!existing.skipped) return
-        if (existing.note.isBlank() && existing.mood == 0) logDao.delete(habitId, epoch)
+        if (existing.note.isBlank() && existing.mood == 0 && existing.ruleId == 0L) logDao.delete(habitId, epoch)
         else logDao.upsert(existing.copy(skipped = false, skipReason = ""))
         afterChange(habit, epoch, false, false, date)
     }
@@ -268,6 +294,75 @@ class HabitRepository(private val db: AppDatabase) {
                     changed = true
                 }
                 d = d.plusDays(1)
+            }
+        }
+        if (changed) bump()
+    }
+
+    // ------------------------------------------------------------------ streak insurance (auto-skip rules)
+
+    fun observeSkipRules(): Flow<List<SkipRule>> = ruleDao.observeAll()
+    suspend fun skipRules(): List<SkipRule> = ruleDao.getAll()
+
+    suspend fun saveSkipRule(rule: SkipRule, today: LocalDate = AppClock.today()): Long {
+        val id = ruleDao.insert(rule)
+        applySkipRules(today)
+        return id
+    }
+
+    suspend fun deleteSkipRule(id: Long, today: LocalDate = AppClock.today()) {
+        ruleDao.delete(id)
+        applySkipRules(today)
+    }
+
+    /** Close an open-ended range rule today ("I'm back"). */
+    suspend fun endSkipRule(id: Long, today: LocalDate = AppClock.today()) {
+        val r = ruleDao.getById(id) ?: return
+        ruleDao.insert(r.copy(toDay = today.toEpochDay(), enabled = true))
+        applySkipRules(today)
+    }
+
+    /**
+     * Streak insurance: write auto-skips for every enabled rule over a window around today and
+     * retract skips whose rule no longer covers the day. Idempotent – safe to call at app start, from
+     * the daily worker and after every rule edit. Days the user completed (or manually skipped /
+     * un-skipped) are never touched: a rule only creates logs where none exist, and only removes logs
+     * it created itself.
+     */
+    suspend fun applySkipRules(today: LocalDate = AppClock.today(), pastDays: Long = 14, futureDays: Long = 60) {
+        val rules = ruleDao.getAll()
+        val habits = habitDao.getActive()
+        val from = today.minusDays(pastDays).toEpochDay()
+        val to = today.plusDays(futureDays).toEpochDay()
+        var changed = false
+        // 1) retract: logs created by a rule that no longer covers that day / habit / exists
+        for (log in logDao.getRuleLogs()) {
+            if (!log.skipped) continue // user overrode the rule for this day – leave their decision alone
+            val habit = habits.firstOrNull { it.id == log.habitId } ?: continue
+            val rule = rules.firstOrNull { it.id == log.ruleId }
+            val still = rule != null && SkipRules.matchesDay(rule, LocalDate.ofEpochDay(log.day)) && SkipRules.appliesTo(rule, habit)
+            if (!still) {
+                if (log.note.isBlank() && log.mood == 0) logDao.delete(log.habitId, log.day)
+                else logDao.upsert(log.copy(skipped = false, skipReason = "", ruleId = 0))
+                changed = true
+            }
+        }
+        // 2) apply: for every covered day without a log, write a skip tagged with the rule id
+        if (rules.any { it.enabled }) {
+            for (habit in habits) {
+                if (habit.negative) continue // avoid-habits have nothing to skip
+                val logs = logDao.getForHabit(habit.id).associateBy { it.day }
+                var e = from
+                while (e <= to) {
+                    val date = LocalDate.ofEpochDay(e)
+                    val rule = SkipRules.covering(rules, habit, date)
+                    val existing = logs[e]
+                    if (rule != null && existing == null && Schedule.isDue(habit, date)) {
+                        logDao.upsert(HabitLog(habit.id, e, 0, false, skipped = true, skipReason = rule.name, ruleId = rule.id))
+                        changed = true
+                    }
+                    e++
+                }
             }
         }
         if (changed) bump()

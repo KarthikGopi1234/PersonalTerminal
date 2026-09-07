@@ -21,6 +21,9 @@ object Routes {
     const val SESSIONS = "timer/sessions"
     const val STRAPS = "straps"
     const val WATCH_STATS = "watch/stats"
+    const val WATCH_BOX = "watch/box"
+    const val YEAR_REVIEW = "review/year"
+    const val SKIP_RULES = "habit/insurance"
     const val IMPORT = "import"
     const val JOURNAL = "journal"
 

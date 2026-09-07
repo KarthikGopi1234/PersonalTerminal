@@ -121,7 +121,12 @@ fun ProfileScreen(app: PersonalTerminalApp, nav: NavHostController) {
             val newReview = settings.lastReviewDay < dev.personalterminal.domain.Schedule.weekStart(today).toEpochDay()
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TermButton(if (newReview) "review --week ●" else "review --week", color = p.cyan, onClick = { nav.navigate(Routes.REVIEW) }, modifier = Modifier.weight(1f))
+                TermButton("review --year", color = p.orange, onClick = { nav.navigate(Routes.YEAR_REVIEW) }, modifier = Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TermButton("man achievements", color = p.yellow, onClick = { nav.navigate(Routes.ACHIEVEMENTS) }, modifier = Modifier.weight(1f))
+                TermButton("watch box", color = p.green, onClick = { nav.navigate(Routes.WATCH_BOX) }, modifier = Modifier.weight(1f))
             }
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

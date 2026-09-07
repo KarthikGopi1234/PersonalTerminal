@@ -5,6 +5,8 @@ import android.content.Context
 import dev.personalterminal.PersonalTerminalApp
 import dev.personalterminal.data.db.Habit
 import dev.personalterminal.data.db.HabitType
+import dev.personalterminal.data.db.checklistItems
+import dev.personalterminal.data.db.hasItem
 import dev.personalterminal.data.db.Watch
 import dev.personalterminal.data.db.displayName
 import dev.personalterminal.domain.Templates
@@ -59,6 +61,21 @@ object Commands {
             "set" -> numberThenHabit(app, rest, null)?.let { (n, h) -> app.habits.setValue(h.id, n, date); ok("${h.name} = $n ${h.unit}".trim()) } ?: err("usage: set <n> <habit>")
             "skip" -> habit(app, rest)?.let { h -> app.habits.skip(h.id, comment, date); ok("[»] ${h.name} skipped" + if (comment.isNotBlank()) " ($comment)" else "") } ?: noHabit(rest)
             "unskip" -> habit(app, rest)?.let { h -> app.habits.unskip(h.id, date); ok("${h.name} un-skipped") } ?: noHabit(rest)
+            "away", "insurance" -> {
+                if (rest.isBlank() || rest.trim() == "list" || rest.trim() == "ls") {
+                    val rules = app.habits.skipRules()
+                    ok(if (rules.isEmpty()) "no insurance rules · `away travel 3d` / `away sick 2026-09-12 2026-09-19` / `away travel` (open)"
+                    else rules.joinToString("\n") { (if (it.enabled) "[✓] " else "[ ] ") + dev.personalterminal.domain.SkipRules.describe(it) }, Routes.SKIP_RULES)
+                } else {
+                    val rule = dev.personalterminal.domain.SkipRules.parseRange(rest, date) ?: return err("usage: away <reason> [<n>d | yyyy-mm-dd [yyyy-mm-dd]]")
+                    app.habits.saveSkipRule(rule, date)
+                    ok("insurance on · " + dev.personalterminal.domain.SkipRules.describe(rule) + (if (rule.toDay == null) " · say `back` when you return" else ""), Routes.SKIP_RULES)
+                }
+            }
+            "back", "home" -> {
+                val open = app.habits.skipRules().filter { it.enabled && it.kind == dev.personalterminal.data.db.SkipRule.KIND_RANGE && it.toDay == null }
+                if (open.isEmpty()) err("no open-ended insurance rule is running") else { open.forEach { app.habits.endSkipRule(it.id, date) }; ok("welcome back · ${open.joinToString { it.name }} ended today, tomorrow counts again") }
+            }
             "slip", "fail" -> habit(app, rest)?.let { h ->
                 if (!h.negative) err("${h.name} is not an avoid-habit") else { app.habits.logSlip(h.id, true, date); ok("[✗] ${h.name} — slip logged, tomorrow is a new day") }
             } ?: noHabit(rest)
@@ -86,8 +103,30 @@ object Commands {
             }
             "watch" -> when (rest.trim().lowercase()) {
                 "next", "suggest" -> ok(app.watches.suggestNext()?.let { "watch next → ${it.first.displayName}: ${it.second}" } ?: "add a watch first", Routes.WATCHES)
+                "box", "grid" -> ok("watch box", Routes.WATCH_BOX)
+                "stats" -> ok("watch stats", Routes.WATCH_STATS)
                 "", "ls" -> ok("open watches", Routes.WATCHES)
                 else -> watch(app, rest)?.let { ok("open ${it.displayName}", Routes.watchDetail(it.id)) } ?: err("no watch matches '$rest'")
+            }
+            "tick", "item" -> {
+                // tick <habit> <item name | number>  – toggles one step of a checklist habit
+                val words = rest.split(Regex("\\s+"))
+                if (words.size < 2) return err("usage: tick <habit> <item>")
+                var found: Pair<dev.personalterminal.data.db.Habit, Int>? = null
+                for (split in words.size - 1 downTo 1) {
+                    val h = habit(app, words.take(split).joinToString(" ")) ?: continue
+                    if (h.type != HabitType.CHECKLIST) return err("${h.name} is not a checklist habit")
+                    val itemRef = words.drop(split).joinToString(" ")
+                    val idx = itemRef.toIntOrNull()?.minus(1) ?: h.checklistItems.indexOfFirst { it.equals(itemRef, true) }.takeIf { it >= 0 }
+                        ?: h.checklistItems.indexOfFirst { it.startsWith(itemRef, true) }.takeIf { it >= 0 }
+                    if (idx == null || idx !in h.checklistItems.indices) return err("${h.name}: items are " + h.checklistItems.mapIndexed { i, it -> "${i + 1}=$it" }.joinToString(" "))
+                    found = h to idx; break
+                }
+                val (h, idx) = found ?: return noHabit(words.first())
+                app.habits.toggleItem(h.id, idx, date)
+                val log = app.db.habitLogDao().get(h.id, date.toEpochDay())
+                val on = log?.hasItem(idx) == true
+                ok((if (on) "[✓] " else "[ ] ") + "${h.checklistItems[idx]} · ${h.name} ${log?.value ?: 0}/${h.checklistItems.size}" + if (log?.completed == true) " ✓ done" + xpHint() else "")
             }
             "remind", "notify" -> {
                 // remind <habit> 07:30 | remind <habit> off | remind <habit> checkin on|off | remind (list)
@@ -138,7 +177,8 @@ object Commands {
                 ok(s.due.joinToString("\n") { hs -> (if (hs.completed) "[✓] " else if (hs.skipped) "[»] " else "[ ] ") + hs.habit.name + if (hs.habit.type != HabitType.CHECKBOX) " ${hs.value}/${hs.habit.target}" else "" }.ifBlank { "nothing due today" })
             }
             "status", "st" -> { val s = app.habits.daySummary(date); ok("${s.done}/${s.active.size} done · ⛨ ${s.shieldsAvailable} · ${s.totalXp} xp") }
-            "review", "weekly" -> ok("weekly review", Routes.REVIEW)
+            "review", "weekly" -> if (rest.trim().lowercase() in setOf("year", "--year", "annual")) ok("year in review", Routes.YEAR_REVIEW) else ok("weekly review", Routes.REVIEW)
+            "year" -> ok("year in review", Routes.YEAR_REVIEW)
             "man", "achievements" -> ok("man achievements", Routes.ACHIEVEMENTS)
             "insights", "correlations" -> ok("insights", Routes.INSIGHTS)
             "timeline", "log" -> ok("timeline", Routes.TIMELINE)
@@ -241,9 +281,10 @@ object Commands {
         |note <habit> -- text  mood <1-5> [habit]
         |timer [min] [habit]   stopwatch [habit]
         |timer stop|pause      wear <watch>
-        |watch next            shield <habit>
-        |remind <habit> 07:30  remind <habit> checkin on
+        |watch next · box      shield <habit>
+        |tick <habit> <item>   remind <habit> 07:30
+        |away <why> [3d|dates] back
         |habit add [template]  ls · status
-        |review · man · insights · theme <name>
+        |review [year] · man · insights · theme <name>
     """.trimMargin()
 }

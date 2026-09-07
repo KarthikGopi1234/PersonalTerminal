@@ -20,9 +20,9 @@ class Converters {
 @Database(
     entities = [
         Routine::class, Habit::class, HabitLog::class, ShieldUse::class, Watch::class, WearLog::class, XpEvent::class,
-        FocusSession::class, WatchService::class, AccuracyReading::class, Strap::class,
+        FocusSession::class, WatchService::class, AccuracyReading::class, Strap::class, SkipRule::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -38,9 +38,11 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun watchServiceDao(): WatchServiceDao
     abstract fun accuracyDao(): AccuracyDao
     abstract fun strapDao(): StrapDao
+    abstract fun skipRuleDao(): SkipRuleDao
 
     /** Wipes every table inside one transaction (used when restoring a backup). */
     suspend fun clearAllData() = withTransaction {
+        skipRuleDao().deleteAll()
         focusSessionDao().deleteAll()
         watchServiceDao().deleteAll()
         accuracyDao().deleteAll()
@@ -61,10 +63,28 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun get(context: Context): AppDatabase = INSTANCE ?: synchronized(this) {
             INSTANCE ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
                 .also { INSTANCE = it }
+        }
+
+        /**
+         * 0.3.1 → 0.3.2: checklist habits (items on the habit, ticked bitmask on the log), time-of-day
+         * sections and streak-insurance rules (`skip_rules` + `habit_logs.ruleId`).
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE habits ADD COLUMN checklist TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE habits ADD COLUMN timeOfDay TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE habit_logs ADD COLUMN items INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE habit_logs ADD COLUMN ruleId INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS skip_rules (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, name TEXT NOT NULL, " +
+                        "kind TEXT NOT NULL, fromDay INTEGER, toDay INTEGER, weekdayMask INTEGER NOT NULL, habitIds TEXT NOT NULL, " +
+                        "enabled INTEGER NOT NULL, createdAt INTEGER NOT NULL)",
+                )
+            }
         }
 
         /** 0.3 → 0.3.1: per-habit evening check-in flag. */

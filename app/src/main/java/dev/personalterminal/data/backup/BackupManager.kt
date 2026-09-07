@@ -12,6 +12,7 @@ import dev.personalterminal.data.db.XpEvent
 import dev.personalterminal.data.db.FocusSession
 import dev.personalterminal.data.db.WatchService
 import dev.personalterminal.data.db.AccuracyReading
+import dev.personalterminal.data.db.SkipRule
 import dev.personalterminal.data.db.Strap
 import dev.personalterminal.data.prefs.NotificationPrefs
 import dev.personalterminal.data.prefs.Settings
@@ -39,7 +40,7 @@ import java.util.zip.ZipOutputStream
 /** Serialisable snapshot of the whole database + user preferences. */
 @Serializable
 data class BackupPayload(
-    val schemaVersion: Int = 2,
+    val schemaVersion: Int = 3,
     val appVersion: String,
     val createdAt: Long,
     val routines: List<Routine>,
@@ -55,6 +56,8 @@ data class BackupPayload(
     val watchServices: List<WatchService> = emptyList(),
     val accuracyReadings: List<AccuracyReading> = emptyList(),
     val straps: List<Strap> = emptyList(),
+    // schema 3 (0.3.2): streak-insurance rules
+    val skipRules: List<SkipRule> = emptyList(),
 )
 
 @Serializable
@@ -137,6 +140,7 @@ class BackupManager(
             watchServices = db.watchServiceDao().getAll(),
             accuracyReadings = db.accuracyDao().getAll(),
             straps = db.strapDao().getAll(),
+            skipRules = db.skipRuleDao().getAll(),
         )
     }
 
@@ -255,6 +259,7 @@ class BackupManager(
         db.watchServiceDao().insertAll(p.watchServices)
         db.accuracyDao().insertAll(p.accuracyReadings)
         db.strapDao().insertAll(p.straps)
+        db.skipRuleDao().insertAll(p.skipRules)
         prefs.setTheme(p.settings.themeName)
         runCatching { dev.personalterminal.data.prefs.ThemeMode.valueOf(p.settings.themeMode) }.getOrNull()?.let { prefs.setThemeMode(it) }
         prefs.setUsername(p.settings.username)

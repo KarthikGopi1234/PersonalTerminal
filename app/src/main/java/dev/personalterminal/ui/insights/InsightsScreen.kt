@@ -96,6 +96,7 @@ fun InsightsScreen(app: PersonalTerminalApp, nav: NavHostController) {
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TermButton("weekly review", color = p.cyan, onClick = { nav.navigate(Routes.REVIEW) }, modifier = Modifier.weight(1f))
+            TermButton("year in review", color = p.orange, onClick = { nav.navigate(Routes.YEAR_REVIEW) }, modifier = Modifier.weight(1f))
             TermButton("journal", color = p.yellow, onClick = { nav.navigate(Routes.JOURNAL) }, modifier = Modifier.weight(1f))
         }
         Spacer(Modifier.height(24.dp))
