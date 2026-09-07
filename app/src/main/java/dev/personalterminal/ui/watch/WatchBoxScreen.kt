@@ -53,7 +53,7 @@ import dev.personalterminal.ui.theme.Term
 import kotlinx.coroutines.launch
 
 /**
- * `watch box` – the collection as a grid of slots, each tinted by how long it has been since the
+ * `watch vault` – the collection as a grid of slots, each tinted by how long it has been since the
  * watch was on the wrist: green (this week) → yellow (2–4 weeks) → orange (1–3 months) → red
  * (neglected). Tap opens the watch; the `wear` corner logs it for today. Sort by neglect, wears
  * or name.
@@ -86,7 +86,7 @@ fun WatchBoxScreen(app: PersonalTerminalApp, nav: NavHostController) {
     ) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             Column {
-                PromptLine("watch box", trailing = "${slots.size} slots")
+                PromptLine("watch vault", trailing = "${slots.size} slots")
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
                     Text("sort:", color = p.fgDim, style = MaterialTheme.typography.labelSmall)
                     listOf("neglect", "wears", "name").forEach { k ->
@@ -118,7 +118,7 @@ fun WatchBoxScreen(app: PersonalTerminalApp, nav: NavHostController) {
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TermButton("watch stats", onClick = { nav.navigate(Routes.WATCH_STATS) }, color = p.green, modifier = Modifier.weight(1f))
+                    TermButton("stats", onClick = { nav.navigate(Routes.WATCH_STATS) }, color = p.green, modifier = Modifier.weight(1f))
                     TermButton("back", onClick = { nav.popBackStack() }, color = p.fgDim, modifier = Modifier.weight(1f))
                 }
                 Spacer(Modifier.height(24.dp))

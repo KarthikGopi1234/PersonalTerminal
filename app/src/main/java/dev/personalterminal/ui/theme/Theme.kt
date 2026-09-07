@@ -100,7 +100,7 @@ fun TerminalTheme(settings: Settings, content: @Composable () -> Unit) {
     }
     val effective = if (settings.accessibilityMode) palette.copy(fgDim = palette.fgDim.mix(palette.fg, 0.35f), border = palette.border.mix(palette.fg, 0.25f)) else palette
     CompositionLocalProvider(LocalPalette provides effective, LocalPrompt provides settings.prompt, LocalAccessible provides settings.accessibilityMode) {
-        val scale = if (settings.accessibilityMode) settings.fontScale * 1.1f else settings.fontScale
+        val scale = (if (settings.accessibilityMode) settings.fontScale * 1.1f else settings.fontScale) * Fonts.sizeFactor(settings.fontName)
         MaterialTheme(colorScheme = effective.toColorScheme(), typography = monoTypography(scale, Fonts.family(settings.fontName))) {
             CrtOverlay(enabled = settings.crtEffect, palette = effective, content = content)
         }

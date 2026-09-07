@@ -204,7 +204,20 @@ fun TermButton(
             .padding(horizontal = 12.dp, vertical = if (accessible) 12.dp else 8.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(if (filled) label else "[ $label ]", color = fg, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+        // Brackets are decoration: when the label does not fit on one line at full size the text
+        // steps down (13 → 11.5 → 10 sp) before it is ever ellipsised, so `[ watch stats ]` never
+        // turns into `[ watch`.
+        val base = MaterialTheme.typography.labelLarge
+        val stepState = androidx.compose.runtime.remember(label) { androidx.compose.runtime.mutableIntStateOf(0) }
+        val step = stepState.intValue
+        val sizes = listOf(1f, 0.88f, 0.77f)
+        val text = if (filled) label else "[ $label ]"
+        Text(
+            text, color = fg, maxLines = 1, softWrap = false,
+            style = base.copy(fontSize = base.fontSize * sizes[step], lineHeight = base.lineHeight),
+            overflow = if (step == sizes.lastIndex) TextOverflow.Ellipsis else TextOverflow.Clip,
+            onTextLayout = { r -> if (r.hasVisualOverflow && stepState.intValue < sizes.lastIndex) stepState.intValue++ },
+        )
     }
 }
 

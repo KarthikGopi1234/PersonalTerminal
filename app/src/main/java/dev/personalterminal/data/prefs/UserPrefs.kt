@@ -43,6 +43,10 @@ data class Settings(
     val dndDuringFocus: Boolean = false,
     /** Monospace font: "jetbrains" | "fira" | "roboto" | "system". */
     val fontName: String = "jetbrains",
+    /** True once the user picked a font by hand; themes then stop changing it. */
+    val fontPinned: Boolean = false,
+    /** Launcher icon variant id (see `LauncherIcons`). */
+    val launcherIcon: String = "classic",
     /** JSON of a user-imported palette (empty = none). Selected when [themeName] == "custom". */
     val customPaletteJson: String = "",
     /** Passphrase used to encrypt archives ("" = plain zip). Never leaves the device. */
@@ -133,6 +137,8 @@ class UserPrefs(private val context: Context) {
         val REMINDERS = booleanPreferencesKey("reminders")
         val DND_FOCUS = booleanPreferencesKey("dnd_focus")
         val FONT = stringPreferencesKey("font")
+        val FONT_PINNED = booleanPreferencesKey("font_pinned")
+        val LAUNCHER_ICON = stringPreferencesKey("launcher_icon")
         val CUSTOM_PALETTE = stringPreferencesKey("custom_palette")
         val BACKUP_PASSPHRASE = stringPreferencesKey("backup_passphrase")
         val A11Y = booleanPreferencesKey("a11y")
@@ -179,6 +185,8 @@ class UserPrefs(private val context: Context) {
             remindersEnabled = p[Keys.REMINDERS] ?: true,
             dndDuringFocus = p[Keys.DND_FOCUS] ?: false,
             fontName = p[Keys.FONT] ?: "jetbrains",
+            fontPinned = p[Keys.FONT_PINNED] ?: false,
+            launcherIcon = p[Keys.LAUNCHER_ICON] ?: "classic",
             customPaletteJson = p[Keys.CUSTOM_PALETTE] ?: "",
             backupPassphrase = p[Keys.BACKUP_PASSPHRASE] ?: "",
             accessibilityMode = p[Keys.A11Y] ?: false,
@@ -206,7 +214,16 @@ class UserPrefs(private val context: Context) {
 
     suspend fun current(): Settings = settings.first()
 
-    suspend fun setTheme(name: String) = context.dataStore.edit { it[Keys.THEME] = name }
+    /**
+     * Selecting a theme also applies the typeface it was designed with – unless the user has picked a
+     * font explicitly since (see [setFont]), in which case their choice sticks across themes.
+     */
+    suspend fun setTheme(name: String) = context.dataStore.edit {
+        it[Keys.THEME] = name
+        if (it[Keys.FONT_PINNED] != true) {
+            dev.personalterminal.ui.theme.ThemeFamily.entries.firstOrNull { f -> f.id == name }?.let { f -> it[Keys.FONT] = f.font }
+        }
+    }
     suspend fun setThemeMode(mode: ThemeMode) = context.dataStore.edit { it[Keys.MODE] = mode.name }
     suspend fun setUsername(v: String) = context.dataStore.edit { it[Keys.USERNAME] = v.ifBlank { "user" } }
     suspend fun setHostname(v: String) = context.dataStore.edit { it[Keys.HOSTNAME] = v.ifBlank { "android" } }
@@ -229,7 +246,13 @@ class UserPrefs(private val context: Context) {
     suspend fun setQuietHours(startMin: Int, endMin: Int) = context.dataStore.edit { it[Keys.QUIET_START] = startMin; it[Keys.QUIET_END] = endMin }
     suspend fun setRemindersEnabled(v: Boolean) = context.dataStore.edit { it[Keys.REMINDERS] = v }
     suspend fun setDndDuringFocus(v: Boolean) = context.dataStore.edit { it[Keys.DND_FOCUS] = v }
-    suspend fun setFont(name: String) = context.dataStore.edit { it[Keys.FONT] = name }
+    suspend fun setFont(name: String, pin: Boolean = true) = context.dataStore.edit { it[Keys.FONT] = name; it[Keys.FONT_PINNED] = pin }
+    /** Back to "font follows theme". */
+    suspend fun unpinFont(themeName: String) = context.dataStore.edit {
+        it[Keys.FONT_PINNED] = false
+        it[Keys.FONT] = dev.personalterminal.ui.theme.ThemeFamily.entries.firstOrNull { f -> f.id == themeName }?.font ?: "jetbrains"
+    }
+    suspend fun setLauncherIcon(id: String) = context.dataStore.edit { it[Keys.LAUNCHER_ICON] = id }
     suspend fun setCustomPalette(json: String) = context.dataStore.edit { it[Keys.CUSTOM_PALETTE] = json }
     suspend fun setBackupPassphrase(v: String) = context.dataStore.edit { it[Keys.BACKUP_PASSPHRASE] = v }
     suspend fun setAccessibilityMode(v: Boolean) = context.dataStore.edit { it[Keys.A11Y] = v }

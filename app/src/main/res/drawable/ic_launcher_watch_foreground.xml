@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <group android:scaleX="0.80" android:scaleY="0.80" android:pivotX="256" android:pivotY="256">
+        <!-- lugs / strap stubs -->
+        <path android:pathData="M196,84 h120 v40 h-120 z" android:fillColor="#3B4252" />
+        <path android:pathData="M196,388 h120 v40 h-120 z" android:fillColor="#3B4252" />
+        <!-- crown -->
+        <path android:pathData="M404,236 h22 v40 h-22 z" android:fillColor="#8BE9FD" />
+        <!-- case + dial -->
+        <path android:pathData="M256,96 a160,160 0 1,0 0.01,0 z" android:fillColor="#D8DEE9" />
+        <path android:pathData="M256,118 a138,138 0 1,0 0.01,0 z" android:fillColor="#1A1B26" />
+        <!-- indices -->
+        <path android:pathData="M256,132 L256,156 M380,256 L356,256 M256,380 L256,356 M132,256 L156,256" android:strokeColor="#8BE9FD" android:strokeWidth="10" android:strokeLineCap="round" />
+        <!-- hands as prompt chevron -->
+        <path android:pathData="M214,196 L286,256 L214,316" android:strokeColor="#50FA7B" android:strokeWidth="30" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000" />
+        <path android:pathData="M256,256 m-10,0 a10,10 0 1,0 20,0 a10,10 0 1,0 -20,0" android:fillColor="#F8F8F2" />
+    </group>
+</vector>

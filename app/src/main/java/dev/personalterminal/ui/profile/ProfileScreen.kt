@@ -125,8 +125,8 @@ fun ProfileScreen(app: PersonalTerminalApp, nav: NavHostController) {
             }
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TermButton("man achievements", color = p.yellow, onClick = { nav.navigate(Routes.ACHIEVEMENTS) }, modifier = Modifier.weight(1f))
-                TermButton("watch box", color = p.green, onClick = { nav.navigate(Routes.WATCH_BOX) }, modifier = Modifier.weight(1f))
+                TermButton("achievements", color = p.yellow, onClick = { nav.navigate(Routes.ACHIEVEMENTS) }, modifier = Modifier.weight(1f))
+                TermButton("vault", color = p.green, onClick = { nav.navigate(Routes.WATCH_BOX) }, modifier = Modifier.weight(1f))
             }
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

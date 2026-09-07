@@ -61,7 +61,7 @@ fun AchievementsScreen(app: PersonalTerminalApp, nav: NavHostController) {
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        item { PromptLine("man achievements", trailing = "$unlocked/${list.size}") }
+        item { PromptLine("achievements", trailing = "$unlocked/${list.size}") }
         item {
             Text("ACHIEVEMENTS(7)            Personal Terminal Manual            ACHIEVEMENTS(7)", color = p.fgDim, style = MaterialTheme.typography.labelSmall, maxLines = 1)
             Spacer(Modifier.height(8.dp))

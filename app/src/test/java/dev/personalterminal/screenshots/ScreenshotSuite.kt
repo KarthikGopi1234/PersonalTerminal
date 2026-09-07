@@ -141,6 +141,14 @@ class ScreenshotSuite {
     @Test fun watchBox() = shoot("25-watch-box", Tab.WATCH) { nav -> dev.personalterminal.ui.watch.WatchBoxScreen(app, nav) }
     @Test fun yearReview() = shoot("26-year-review", Tab.PROFILE, theme = "gruvbox") { nav -> dev.personalterminal.ui.insights.YearReviewScreen(app, nav) }
     @Test fun insurance() = shoot("27-streak-insurance", Tab.HABITS) { nav -> dev.personalterminal.ui.habits.SkipRulesScreen(app, nav) }
+    @Test fun themeTokyoNight() = shoot("28-theme-tokyo-night", Tab.TODAY, theme = "tokyonight") { nav -> TodayScreen(app, nav) }
+    @Test fun themeAmberCrt() = shoot("29-theme-amber-crt", Tab.WATCH, theme = "amber", crt = true) { nav -> WatchesScreen(app, nav) }
+    @Test fun themeRosePineDawn() = shoot("30-theme-rose-pine-dawn", Tab.PROFILE, theme = "rosepine", dark = false) { nav -> ProfileScreen(app, nav) }
+    @Test fun themeSynthwave() = shoot("31-theme-synthwave", Tab.TIMER, theme = "synthwave") { nav -> SessionsScreen(app, nav) }
+    @Test fun fontsAndIcons() = shoot("32-fonts-icons", Tab.PROFILE, theme = "onedark") { nav ->
+        // settings scrolled to the font / icon pickers
+        SettingsScreen(app, nav, scrollToAppearanceEnd = true)
+    }
 
     @Suppress("UNCHECKED_CAST")
     private fun setTimerState(state: TimerState) {
@@ -164,6 +172,7 @@ class ScreenshotSuite {
             themeMode = if (dark) ThemeMode.DARK else ThemeMode.LIGHT,
             username = DemoData.USERNAME,
             crtEffect = crt,
+            fontName = dev.personalterminal.ui.theme.ThemeFamily.fromId(theme).font,
         )
         rule.setContent {
             TerminalTheme(settings) {

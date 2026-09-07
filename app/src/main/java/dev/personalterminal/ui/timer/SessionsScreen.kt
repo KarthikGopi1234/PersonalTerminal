@@ -61,7 +61,7 @@ fun SessionsScreen(app: PersonalTerminalApp, nav: NavHostController) {
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        item { PromptLine("history | grep focus", trailing = "${totalMin / 60}h ${totalMin % 60}m") }
+        item { PromptLine("focus history", trailing = "${totalMin / 60}h ${totalMin % 60}m") }
         item {
             TerminalPanel(title = "focus minutes · 26 weeks", titleColor = p.orange) {
                 Row(Modifier.horizontalScroll(rememberScrollState(), reverseScrolling = true)) {

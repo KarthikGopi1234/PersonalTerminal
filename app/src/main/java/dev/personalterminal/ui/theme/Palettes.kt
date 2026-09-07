@@ -33,15 +33,25 @@ data class TerminalPalette(
     }
 }
 
-/** Theme families; each has a dark and a light variant. */
-enum class ThemeFamily(val id: String, val label: String) {
-    DRACULA("dracula", "Dracula"),
-    NORD("nord", "Nord"),
-    SOLARIZED("solarized", "Solarized"),
-    GRUVBOX("gruvbox", "Gruvbox"),
-    MONOKAI("monokai", "Monokai"),
-    CATPPUCCIN("catppuccin", "Catppuccin"),
-    MATRIX("matrix", "Matrix");
+/**
+ * Theme families; each has a dark and a light variant. [font] is the typeface the theme was designed
+ * with – picking a theme applies it (the font can still be overridden afterwards in settings).
+ */
+enum class ThemeFamily(val id: String, val label: String, val font: String = "jetbrains", val blurb: String = "") {
+    DRACULA("dracula", "Dracula", "jetbrains", "the classic purple-on-charcoal"),
+    NORD("nord", "Nord", "fira", "arctic blues, low contrast"),
+    SOLARIZED("solarized", "Solarized", "source", "ethan schoonover's precision palette"),
+    GRUVBOX("gruvbox", "Gruvbox", "plex", "retro groove, warm paper tones"),
+    MONOKAI("monokai", "Monokai", "roboto", "sublime text's neon on grey"),
+    CATPPUCCIN("catppuccin", "Catppuccin", "victor", "soothing pastels, mocha & latte"),
+    TOKYO_NIGHT("tokyonight", "Tokyo Night", "jetbrains", "neon city at 2 am"),
+    ONE_DARK("onedark", "One Dark", "source", "atom's editor default"),
+    ROSE_PINE("rosepine", "Rosé Pine", "victor", "soho vibes, muted rose & gold"),
+    EVERFOREST("everforest", "Everforest", "plex", "green-tinted comfort, easy on the eyes"),
+    AMBER("amber", "Amber CRT", "vt323", "1978 phosphor terminal, crt recommended"),
+    MATRIX("matrix", "Matrix", "vt323", "green phosphor / paper terminal"),
+    HACKER("hacker", "Hacker", "space", "pure black, white text, one red accent"),
+    SYNTHWAVE("synthwave", "Synthwave '84", "space", "outrun magenta & cyan");
 
     companion object {
         fun fromId(id: String): ThemeFamily = entries.firstOrNull { it.id == id } ?: DRACULA
@@ -72,7 +82,14 @@ object Palettes {
         ThemeFamily.GRUVBOX -> if (dark) gruvboxDark else gruvboxLight
         ThemeFamily.MONOKAI -> if (dark) monokaiDark else monokaiLight
         ThemeFamily.CATPPUCCIN -> if (dark) catppuccinMocha else catppuccinLatte
+        ThemeFamily.TOKYO_NIGHT -> if (dark) tokyoNight else tokyoDay
+        ThemeFamily.ONE_DARK -> if (dark) oneDark else oneLight
+        ThemeFamily.ROSE_PINE -> if (dark) rosePine else rosePineDawn
+        ThemeFamily.EVERFOREST -> if (dark) everforestDark else everforestLight
+        ThemeFamily.AMBER -> if (dark) amberDark else amberLight
         ThemeFamily.MATRIX -> if (dark) matrixDark else matrixLight
+        ThemeFamily.HACKER -> if (dark) hackerDark else hackerLight
+        ThemeFamily.SYNTHWAVE -> if (dark) synthwaveDark else synthwaveLight
     }
 
     // ---- Dracula ----------------------------------------------------------------
@@ -169,6 +186,118 @@ object Palettes {
         fg = Color(0xFF4C4F69), fgDim = Color(0xFF9CA0B0), border = Color(0xFFBCC0CC),
         red = Color(0xFFD20F39), green = Color(0xFF40A02B), yellow = Color(0xFFDF8E1D), blue = Color(0xFF1E66F5),
         purple = Color(0xFF8839EF), cyan = Color(0xFF179299), orange = Color(0xFFFE640B), pink = Color(0xFFEA76CB),
+    )
+
+    // ---- Tokyo Night ------------------------------------------------------------
+    val tokyoNight = TerminalPalette(
+        id = "tokyonight", name = "Tokyo Night", dark = true,
+        bg = Color(0xFF1A1B26), bgAlt = Color(0xFF16161E), bgHighlight = Color(0xFF292E42),
+        fg = Color(0xFFC0CAF5), fgDim = Color(0xFF565F89), border = Color(0xFF3B4261),
+        red = Color(0xFFF7768E), green = Color(0xFF9ECE6A), yellow = Color(0xFFE0AF68), blue = Color(0xFF7AA2F7),
+        purple = Color(0xFFBB9AF7), cyan = Color(0xFF7DCFFF), orange = Color(0xFFFF9E64), pink = Color(0xFFFF75A0),
+    )
+    val tokyoDay = TerminalPalette(
+        id = "tokyonight", name = "Tokyo Day", dark = false,
+        bg = Color(0xFFE1E2E7), bgAlt = Color(0xFFD5D6DB), bgHighlight = Color(0xFFC4C8DA),
+        fg = Color(0xFF3760BF), fgDim = Color(0xFF848CB5), border = Color(0xFFA8AECB),
+        red = Color(0xFFF52A65), green = Color(0xFF587539), yellow = Color(0xFF8C6C3E), blue = Color(0xFF2E7DE9),
+        purple = Color(0xFF9854F1), cyan = Color(0xFF007197), orange = Color(0xFFB15C00), pink = Color(0xFFD20065),
+    )
+
+    // ---- One Dark ---------------------------------------------------------------
+    val oneDark = TerminalPalette(
+        id = "onedark", name = "One Dark", dark = true,
+        bg = Color(0xFF282C34), bgAlt = Color(0xFF21252B), bgHighlight = Color(0xFF3E4451),
+        fg = Color(0xFFABB2BF), fgDim = Color(0xFF5C6370), border = Color(0xFF3E4451),
+        red = Color(0xFFE06C75), green = Color(0xFF98C379), yellow = Color(0xFFE5C07B), blue = Color(0xFF61AFEF),
+        purple = Color(0xFFC678DD), cyan = Color(0xFF56B6C2), orange = Color(0xFFD19A66), pink = Color(0xFFE06C9F),
+    )
+    val oneLight = TerminalPalette(
+        id = "onedark", name = "One Light", dark = false,
+        bg = Color(0xFFFAFAFA), bgAlt = Color(0xFFF0F0F1), bgHighlight = Color(0xFFDBDBDC),
+        fg = Color(0xFF383A42), fgDim = Color(0xFFA0A1A7), border = Color(0xFFD3D3D3),
+        red = Color(0xFFE45649), green = Color(0xFF50A14F), yellow = Color(0xFFC18401), blue = Color(0xFF4078F2),
+        purple = Color(0xFFA626A4), cyan = Color(0xFF0184BC), orange = Color(0xFF986801), pink = Color(0xFFCA1243),
+    )
+
+    // ---- Rosé Pine --------------------------------------------------------------
+    val rosePine = TerminalPalette(
+        id = "rosepine", name = "Rosé Pine", dark = true,
+        bg = Color(0xFF191724), bgAlt = Color(0xFF1F1D2E), bgHighlight = Color(0xFF26233A),
+        fg = Color(0xFFE0DEF4), fgDim = Color(0xFF6E6A86), border = Color(0xFF403D52),
+        red = Color(0xFFEB6F92), green = Color(0xFF9CCFD8), yellow = Color(0xFFF6C177), blue = Color(0xFF31748F),
+        purple = Color(0xFFC4A7E7), cyan = Color(0xFF9CCFD8), orange = Color(0xFFEA9A97), pink = Color(0xFFEBBCBA),
+    )
+    val rosePineDawn = TerminalPalette(
+        id = "rosepine", name = "Rosé Pine Dawn", dark = false,
+        bg = Color(0xFFFAF4ED), bgAlt = Color(0xFFFFFAF3), bgHighlight = Color(0xFFF2E9E1),
+        fg = Color(0xFF575279), fgDim = Color(0xFF9893A5), border = Color(0xFFDFDAD9),
+        red = Color(0xFFB4637A), green = Color(0xFF56949F), yellow = Color(0xFFEA9D34), blue = Color(0xFF286983),
+        purple = Color(0xFF907AA9), cyan = Color(0xFF56949F), orange = Color(0xFFD7827E), pink = Color(0xFFD7827E),
+    )
+
+    // ---- Everforest -------------------------------------------------------------
+    val everforestDark = TerminalPalette(
+        id = "everforest", name = "Everforest", dark = true,
+        bg = Color(0xFF2D353B), bgAlt = Color(0xFF272E33), bgHighlight = Color(0xFF3D484D),
+        fg = Color(0xFFD3C6AA), fgDim = Color(0xFF859289), border = Color(0xFF475258),
+        red = Color(0xFFE67E80), green = Color(0xFFA7C080), yellow = Color(0xFFDBBC7F), blue = Color(0xFF7FBBB3),
+        purple = Color(0xFFD699B6), cyan = Color(0xFF83C092), orange = Color(0xFFE69875), pink = Color(0xFFD699B6),
+    )
+    val everforestLight = TerminalPalette(
+        id = "everforest", name = "Everforest Light", dark = false,
+        bg = Color(0xFFFDF6E3), bgAlt = Color(0xFFF4F0D9), bgHighlight = Color(0xFFEFEBD4),
+        fg = Color(0xFF5C6A72), fgDim = Color(0xFF939F91), border = Color(0xFFE0DCC7),
+        red = Color(0xFFF85552), green = Color(0xFF8DA101), yellow = Color(0xFFDFA000), blue = Color(0xFF3A94C5),
+        purple = Color(0xFFDF69BA), cyan = Color(0xFF35A77C), orange = Color(0xFFF57D26), pink = Color(0xFFDF69BA),
+    )
+
+    // ---- Amber CRT (single-hue phosphor, like Matrix but 1978 orange) ------------
+    val amberDark = TerminalPalette(
+        id = "amber", name = "Amber CRT", dark = true,
+        bg = Color(0xFF0A0700), bgAlt = Color(0xFF130D00), bgHighlight = Color(0xFF2A1C00),
+        fg = Color(0xFFFFB000), fgDim = Color(0xFF9A6A00), border = Color(0xFF3F2C00),
+        red = Color(0xFFFF8C00), green = Color(0xFFFFB000), yellow = Color(0xFFFFD75F), blue = Color(0xFFE09A00),
+        purple = Color(0xFFE09A00), cyan = Color(0xFFFFD75F), orange = Color(0xFFFF8C00), pink = Color(0xFFFFC966),
+    )
+    val amberLight = TerminalPalette(
+        id = "amber", name = "Amber Paper", dark = false,
+        bg = Color(0xFFFBF3E1), bgAlt = Color(0xFFF3E8CF), bgHighlight = Color(0xFFE8D9B5),
+        fg = Color(0xFF5A3A00), fgDim = Color(0xFFA0803F), border = Color(0xFFD9C79A),
+        red = Color(0xFF9A3B00), green = Color(0xFF7A5000), yellow = Color(0xFFB07500), blue = Color(0xFF6E4A00),
+        purple = Color(0xFF6E4A00), cyan = Color(0xFF8A6200), orange = Color(0xFF9A3B00), pink = Color(0xFF8A6200),
+    )
+
+    // ---- Hacker (monochrome + one red accent) ----------------------------------------
+    val hackerDark = TerminalPalette(
+        id = "hacker", name = "Hacker", dark = true,
+        bg = Color(0xFF000000), bgAlt = Color(0xFF0A0A0A), bgHighlight = Color(0xFF1A1A1A),
+        fg = Color(0xFFEDEDED), fgDim = Color(0xFF6B6B6B), border = Color(0xFF2A2A2A),
+        red = Color(0xFFFF3B30), green = Color(0xFFEDEDED), yellow = Color(0xFFBDBDBD), blue = Color(0xFF9E9E9E),
+        purple = Color(0xFFBDBDBD), cyan = Color(0xFFD6D6D6), orange = Color(0xFFFF3B30), pink = Color(0xFFBDBDBD),
+    )
+    val hackerLight = TerminalPalette(
+        id = "hacker", name = "Hacker Light", dark = false,
+        bg = Color(0xFFFFFFFF), bgAlt = Color(0xFFF4F4F4), bgHighlight = Color(0xFFE4E4E4),
+        fg = Color(0xFF111111), fgDim = Color(0xFF8A8A8A), border = Color(0xFFD0D0D0),
+        red = Color(0xFFD1231A), green = Color(0xFF111111), yellow = Color(0xFF444444), blue = Color(0xFF555555),
+        purple = Color(0xFF444444), cyan = Color(0xFF333333), orange = Color(0xFFD1231A), pink = Color(0xFF444444),
+    )
+
+    // ---- Synthwave '84 ----------------------------------------------------------
+    val synthwaveDark = TerminalPalette(
+        id = "synthwave", name = "Synthwave '84", dark = true,
+        bg = Color(0xFF262335), bgAlt = Color(0xFF1E1B2E), bgHighlight = Color(0xFF3B2F5C),
+        fg = Color(0xFFF4EEE4), fgDim = Color(0xFF8A7FA8), border = Color(0xFF4B3F73),
+        red = Color(0xFFFE4450), green = Color(0xFF72F1B8), yellow = Color(0xFFFEDE5D), blue = Color(0xFF36F9F6),
+        purple = Color(0xFFB893FF), cyan = Color(0xFF36F9F6), orange = Color(0xFFFF8B39), pink = Color(0xFFFF7EDB),
+    )
+    val synthwaveLight = TerminalPalette(
+        id = "synthwave", name = "Synthwave Dawn", dark = false,
+        bg = Color(0xFFF6F0FA), bgAlt = Color(0xFFEDE4F4), bgHighlight = Color(0xFFDCCDEA),
+        fg = Color(0xFF3B2F5C), fgDim = Color(0xFF9282B0), border = Color(0xFFCDBEDF),
+        red = Color(0xFFD9203A), green = Color(0xFF1E9E6A), yellow = Color(0xFFB08A00), blue = Color(0xFF0E8F8D),
+        purple = Color(0xFF7A4FD6), cyan = Color(0xFF0E8F8D), orange = Color(0xFFD86A1B), pink = Color(0xFFD1409E),
     )
 
     // ---- Matrix (pure green phosphor) -------------------------------------------

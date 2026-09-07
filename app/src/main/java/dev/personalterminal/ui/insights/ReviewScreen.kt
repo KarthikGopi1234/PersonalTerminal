@@ -142,7 +142,7 @@ fun ReviewScreen(app: PersonalTerminalApp, nav: NavHostController) {
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TermButton("insights", color = p.purple, onClick = { nav.navigate(Routes.INSIGHTS) }, modifier = Modifier.weight(1f))
-            TermButton("man achievements", color = p.yellow, onClick = { nav.navigate(Routes.ACHIEVEMENTS) }, modifier = Modifier.weight(1f))
+            TermButton("achievements", color = p.yellow, onClick = { nav.navigate(Routes.ACHIEVEMENTS) }, modifier = Modifier.weight(1f))
         }
         Spacer(Modifier.height(24.dp))
     }

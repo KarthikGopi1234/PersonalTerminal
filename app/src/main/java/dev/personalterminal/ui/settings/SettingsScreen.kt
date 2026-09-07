@@ -38,6 +38,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
@@ -66,7 +71,13 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 @Composable
-fun SettingsScreen(app: PersonalTerminalApp, nav: NavHostController) {
+fun SettingsScreen(
+    app: PersonalTerminalApp,
+    nav: NavHostController,
+    scrollState: androidx.compose.foundation.ScrollState = rememberScrollState(),
+    /** Test hook: scroll so the end of the appearance panel (font + icon pickers) is on screen. */
+    scrollToAppearanceEnd: Boolean = false,
+) {
     val p = Term.palette
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -159,8 +170,10 @@ fun SettingsScreen(app: PersonalTerminalApp, nav: NavHostController) {
         }
     }
 
-    Column(Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        PromptLine("vim ~/.config", trailing = "v${BuildConfig.VERSION_NAME.removeSuffix("-local")}")
+    var appearanceEnd by remember { mutableStateOf(0) }
+    LaunchedEffect(scrollToAppearanceEnd, appearanceEnd) { if (scrollToAppearanceEnd && appearanceEnd > 0) scrollState.scrollTo((appearanceEnd - 1500).coerceAtLeast(0)) }
+    Column(Modifier.fillMaxSize().statusBarsPadding().verticalScroll(scrollState).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        PromptLine("settings", trailing = "v${BuildConfig.VERSION_NAME.removeSuffix("-local")}")
 
         // ---------------- appearance ----------------
         TerminalPanel(title = "appearance") {
@@ -187,15 +200,29 @@ fun SettingsScreen(app: PersonalTerminalApp, nav: NavHostController) {
             Text("mode:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
             RadioRow(options = ThemeMode.entries, selected = settings.themeMode, onSelect = { scope.launch { app.prefs.setThemeMode(it) } }, label = { it.name.lowercase() })
             Spacer(Modifier.height(4.dp))
-            Text("font:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("font:", color = p.fgDim, style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                Text(
+                    if (settings.fontPinned) "[ follow theme ]" else "follows theme",
+                    color = if (settings.fontPinned) p.cyan else p.fgDim, style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.clickable(enabled = settings.fontPinned) { scope.launch { app.prefs.unpinFont(settings.themeName) } }.padding(2.dp),
+                )
+            }
             Column {
                 dev.personalterminal.ui.theme.Fonts.options.forEach { f ->
                     val sel = settings.fontName == f.id
-                    Text((if (sel) "(•) " else "( ) ") + f.label + "  the quick brown fox 0123", color = if (sel) p.green else p.fgDim,
-                        style = MaterialTheme.typography.bodyMedium.copy(fontFamily = f.family),
-                        modifier = Modifier.clickable { scope.launch { app.prefs.setFont(f.id) } }.padding(vertical = 3.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Column(Modifier.fillMaxWidth().clickable { scope.launch { app.prefs.setFont(f.id) } }.padding(vertical = 3.dp)) {
+                        Text((if (sel) "(•) " else "( ) ") + f.label + "  quick fox 0O1lI", color = if (sel) p.green else p.fg,
+                            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = f.family, fontSize = MaterialTheme.typography.bodyMedium.fontSize * dev.personalterminal.ui.theme.Fonts.sizeFactor(f.id)),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("    " + f.blurb, color = p.fgDim, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
+            Comment(if (settings.fontPinned) "pinned – themes keep this font until you tap `follow theme`" else "each theme brings its own typeface; pick one here to pin it")
+            Spacer(Modifier.height(8.dp))
+            Text("icon:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+            IconPicker(app, settings.launcherIcon, say = { say(it) })
             Spacer(Modifier.height(4.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("font scale: ", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
@@ -209,6 +236,7 @@ fun SettingsScreen(app: PersonalTerminalApp, nav: NavHostController) {
             ToggleLine("today: group by time of day (morning / afternoon / evening) instead of routine", settings.todaySections) { scope.launch { app.prefs.setTodaySections(it) } }
             ToggleLine("crt scanlines & glow", settings.crtEffect) { scope.launch { app.prefs.setCrt(it) } }
             ToggleLine("accessibility: bigger targets, higher contrast, no animations", settings.accessibilityMode) { scope.launch { app.prefs.setAccessibilityMode(it) } }
+            Spacer(Modifier.height(1.dp).onGloballyPositioned { appearanceEnd = it.positionInRoot().y.toInt() + scrollState.value })
         }
 
         // ---------------- notifications ----------------
@@ -429,12 +457,61 @@ private fun ThemeCard(family: ThemeFamily, selected: Boolean, dark: Boolean, mod
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text((if (selected) "(•) " else "( ) ") + family.label, color = pal.fg, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val face = dev.personalterminal.ui.theme.Fonts.options.firstOrNull { it.id == family.font }
+            Text(
+                (if (selected) "(•) " else "( ) ") + family.label, color = pal.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelMedium.copy(fontFamily = face?.family ?: MaterialTheme.typography.labelMedium.fontFamily,
+                    fontSize = MaterialTheme.typography.labelMedium.fontSize * dev.personalterminal.ui.theme.Fonts.sizeFactor(family.font)),
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(3.dp), modifier = Modifier.padding(top = 4.dp)) {
                 listOf(pal.red, pal.green, pal.yellow, pal.blue, pal.purple, pal.cyan).forEach { Box(Modifier.size(10.dp).background(it, RoundedCornerShape(2.dp))) }
             }
+            Text(face?.label?.lowercase() ?: "", color = pal.fgDim, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
         }
     }
+}
+
+/** Launcher icon variants – tap to swap the home-screen icon (one activity-alias enabled at a time). */
+@Composable
+private fun IconPicker(app: PersonalTerminalApp, selectedId: String, say: (String) -> Unit) {
+    val p = Term.palette
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // the package manager is the source of truth (a restored backup may carry a different pref)
+    val actual = remember { dev.personalterminal.LauncherIcons.current(ctx) }
+    var current by remember { mutableStateOf(actual) }
+    Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        dev.personalterminal.LauncherIcons.options.forEach { o ->
+            val sel = current == o.id
+            Column(
+                Modifier
+                    .clickable {
+                        current = o.id
+                        scope.launch {
+                            app.prefs.setLauncherIcon(o.id)
+                            runCatching { dev.personalterminal.LauncherIcons.apply(ctx, o.id) }
+                                .onSuccess { say("icon → ${o.label} · the launcher may take a moment to redraw") }
+                                .onFailure { say("could not switch icon: ${it.message}") }
+                        }
+                    }
+                    .padding(2.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    Modifier.size(56.dp).clip(RoundedCornerShape(14.dp)).background(Color(o.background))
+                        .border(if (sel) 2.dp else 1.dp, if (sel) p.green else p.border, RoundedCornerShape(14.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    androidx.compose.foundation.Image(
+                        painter = androidx.compose.ui.res.painterResource(o.foreground), contentDescription = o.label,
+                        modifier = Modifier.size(84.dp), // adaptive foregrounds are drawn inside a 108dp canvas with a safe zone
+                    )
+                }
+                Text((if (sel) "[" else " ") + o.label + (if (sel) "]" else " "), color = if (sel) p.green else p.fgDim, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 3.dp))
+            }
+        }
+    }
+    Comment(dev.personalterminal.LauncherIcons.option(current).blurb)
 }
 
 

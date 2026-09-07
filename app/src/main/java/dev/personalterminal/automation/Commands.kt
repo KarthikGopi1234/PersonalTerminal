@@ -61,6 +61,7 @@ object Commands {
             "set" -> numberThenHabit(app, rest, null)?.let { (n, h) -> app.habits.setValue(h.id, n, date); ok("${h.name} = $n ${h.unit}".trim()) } ?: err("usage: set <n> <habit>")
             "skip" -> habit(app, rest)?.let { h -> app.habits.skip(h.id, comment, date); ok("[»] ${h.name} skipped" + if (comment.isNotBlank()) " ($comment)" else "") } ?: noHabit(rest)
             "unskip" -> habit(app, rest)?.let { h -> app.habits.unskip(h.id, date); ok("${h.name} un-skipped") } ?: noHabit(rest)
+            "vault" -> ok("watch vault", Routes.WATCH_BOX)
             "away", "insurance" -> {
                 if (rest.isBlank() || rest.trim() == "list" || rest.trim() == "ls") {
                     val rules = app.habits.skipRules()
@@ -103,7 +104,7 @@ object Commands {
             }
             "watch" -> when (rest.trim().lowercase()) {
                 "next", "suggest" -> ok(app.watches.suggestNext()?.let { "watch next → ${it.first.displayName}: ${it.second}" } ?: "add a watch first", Routes.WATCHES)
-                "box", "grid" -> ok("watch box", Routes.WATCH_BOX)
+                "vault", "box", "grid" -> ok("watch vault", Routes.WATCH_BOX)
                 "stats" -> ok("watch stats", Routes.WATCH_STATS)
                 "", "ls" -> ok("open watches", Routes.WATCHES)
                 else -> watch(app, rest)?.let { ok("open ${it.displayName}", Routes.watchDetail(it.id)) } ?: err("no watch matches '$rest'")
@@ -179,7 +180,7 @@ object Commands {
             "status", "st" -> { val s = app.habits.daySummary(date); ok("${s.done}/${s.active.size} done · ⛨ ${s.shieldsAvailable} · ${s.totalXp} xp") }
             "review", "weekly" -> if (rest.trim().lowercase() in setOf("year", "--year", "annual")) ok("year in review", Routes.YEAR_REVIEW) else ok("weekly review", Routes.REVIEW)
             "year" -> ok("year in review", Routes.YEAR_REVIEW)
-            "man", "achievements" -> ok("man achievements", Routes.ACHIEVEMENTS)
+            "man", "achievements" -> ok("achievements", Routes.ACHIEVEMENTS)
             "insights", "correlations" -> ok("insights", Routes.INSIGHTS)
             "timeline", "log" -> ok("timeline", Routes.TIMELINE)
             "profile", "whoami" -> ok("profile", Routes.PROFILE)
@@ -189,6 +190,22 @@ object Commands {
                 val fam = dev.personalterminal.ui.theme.ThemeFamily.entries.firstOrNull { it.id == id }
                 if (fam == null && id != "custom") err("themes: " + dev.personalterminal.ui.theme.ThemeFamily.entries.joinToString(" ") { it.id })
                 else { app.prefs.setTheme(id); ok("theme → $id") }
+            }
+            "font" -> {
+                val id = rest.trim().lowercase()
+                val opts = dev.personalterminal.ui.theme.Fonts.options
+                when {
+                    id.isBlank() || id == "ls" -> ok(opts.joinToString("\n") { "${it.id.padEnd(10)} ${it.label}" })
+                    id == "theme" || id == "auto" -> { app.prefs.unpinFont(app.prefs.current().themeName); ok("font follows the theme again") }
+                    opts.none { it.id == id } -> err("fonts: " + opts.joinToString(" ") { it.id })
+                    else -> { app.prefs.setFont(id); ok("font → $id (pinned)") }
+                }
+            }
+            "icon" -> {
+                val id = rest.trim().lowercase()
+                val opts = dev.personalterminal.LauncherIcons.options
+                if (opts.none { it.id == id }) err("icons: " + opts.joinToString(" ") { it.id })
+                else { app.prefs.setLauncherIcon(id); runCatching { dev.personalterminal.LauncherIcons.apply(context, id) }; ok("icon → $id") }
             }
             "dark" -> { app.prefs.setThemeMode(dev.personalterminal.data.prefs.ThemeMode.DARK); ok("mode → dark") }
             "light" -> { app.prefs.setThemeMode(dev.personalterminal.data.prefs.ThemeMode.LIGHT); ok("mode → light") }
@@ -281,10 +298,11 @@ object Commands {
         |note <habit> -- text  mood <1-5> [habit]
         |timer [min] [habit]   stopwatch [habit]
         |timer stop|pause      wear <watch>
-        |watch next · box      shield <habit>
+        |watch next · vault    shield <habit>
         |tick <habit> <item>   remind <habit> 07:30
         |away <why> [3d|dates] back
         |habit add [template]  ls · status
-        |review [year] · man · insights · theme <name>
+        |review [year] · achievements · insights
+        |theme <name> · font <name> · icon <name>
     """.trimMargin()
 }

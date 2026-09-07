@@ -93,8 +93,8 @@ fun WatchesScreen(app: PersonalTerminalApp, nav: NavHostController) {
             }
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TermButton("watch box", onClick = { nav.navigate(Routes.WATCH_BOX) }, color = p.yellow, modifier = Modifier.weight(1f))
-                TermButton("watch stats", onClick = { nav.navigate(Routes.WATCH_STATS) }, color = p.green, modifier = Modifier.weight(1f))
+                TermButton("vault", onClick = { nav.navigate(Routes.WATCH_BOX) }, color = p.yellow, modifier = Modifier.weight(1f))
+                TermButton("stats", onClick = { nav.navigate(Routes.WATCH_STATS) }, color = p.green, modifier = Modifier.weight(1f))
                 TermButton("straps", onClick = { nav.navigate(Routes.STRAPS) }, color = p.purple, modifier = Modifier.weight(1f))
             }
         }

@@ -10,12 +10,12 @@
 - **Streaks, shields & insurance** — earned streak freezes protect a chain after a missed day; skips bridge it for free; *insurance rules* auto-skip travel, sick leave or weekly rest days (`away travel 3d` … `back`).
 - **Command line** — a real prompt on Today: `done stretch`, `add 2 water`, `tick gym bag towel`, `timer 25 focus`, `wear speedy`, `skip run -- sick`, `away travel 3d`, `remind read 21:00`, `watch next`, `help`.
 - **Focus** — pomodoro with per-habit intervals, stopwatch mode, optional Do-Not-Disturb, session history on its own heatmap, Quick Settings tile, live countdown notification (Android 16 Live Update).
-- **Insights** — GitHub-style heatmap, XP and levels, weekly review and `review --year` as shareable monospace cards, `man achievements`, per-habit heatmaps and cross-habit correlations.
+- **Insights** — GitHub-style heatmap, XP and levels, weekly review and `review --year` as shareable monospace cards, achievements as a man page, per-habit heatmaps and cross-habit correlations.
 - **Widgets** — tick habits off from the home screen (today list), plus status and timer widgets; app shortcuts; Tasker / adb intent API; Health Connect auto-completion.
-- **Watch tracker** — photograph today's watch, an optional daily "which watch today?" notice with a one-tap *wear it*, a watch-box grid colour-coded by days since worn, "on this day" wrist-shot memories on the timeline, collection stats (wear share, neglected, cost per wear), service log with reminders, accuracy / drift, strap library, `watch next` rotation suggester, purchase & valuation, CSV export.
+- **Watch tracker** — photograph today's watch, an optional daily "which watch today?" notice with a one-tap *wear it*, a *vault* grid colour-coded by days since worn, "on this day" wrist-shot memories on the timeline, collection stats (wear share, neglected, cost per wear), service log with reminders, accuracy / drift, strap library, `watch next` rotation suggester, purchase & valuation, CSV export.
 - **Backup** — automatic Google Drive backups (optionally AES-256 encrypted), restore on first launch, local export/import, importers for Loop Habit Tracker and Habitica.
 - **Notifications, your way** — every notification the app can send (habit reminders, check-in, streak at risk, weekly review, wear log, service due, timer alerts) has its own switch and time under settings › notifications, behind one master switch and shared quiet hours.
-- **Terminal feel** — Dracula, Nord, Solarized, Gruvbox, Monokai, Catppuccin, Matrix or an imported colour scheme · light & dark · JetBrains Mono / Fira Code / Roboto Mono · CRT shader · tablet split panes · accessibility mode.
+- **Terminal feel** — 14 themes (Dracula, Nord, Solarized, Gruvbox, Monokai, Catppuccin, Tokyo Night, One Dark, Rosé Pine, Everforest, Amber CRT, Matrix, Hacker, Synthwave '84) or an imported colour scheme, each paired with its own typeface from nine bundled monospace fonts (JetBrains Mono, Fira Code, Roboto Mono, IBM Plex Mono, Source Code Pro, Victor Mono, Space Mono, VT323) · six launcher icons · light & dark · CRT shader · tablet split panes · accessibility mode.
 
 ## Screenshots
 
@@ -31,7 +31,7 @@
 |:-:|:-:|:-:|:-:|
 | <img src="screenshots/09-settings.png" width="200" alt="Settings"> | <img src="screenshots/10-theme-nord-light.png" width="200" alt="Nord light theme"> | <img src="screenshots/11-theme-gruvbox.png" width="200" alt="Gruvbox theme"> | <img src="screenshots/12-theme-solarized-light.png" width="200" alt="Solarized light theme"> |
 
-| Weekly review | `man achievements` | Insights | Templates |
+| Weekly review | Achievements | Insights | Templates |
 |:-:|:-:|:-:|:-:|
 | <img src="screenshots/13-review.png" width="200" alt="Weekly review with shareable card"> | <img src="screenshots/14-achievements.png" width="200" alt="Achievements as a man page"> | <img src="screenshots/15-insights.png" width="200" alt="Correlations and per-habit heatmaps"> | <img src="screenshots/16-templates.png" width="200" alt="Habit templates"> |
 
@@ -43,9 +43,13 @@
 |:-:|:-:|:-:|:-:|
 | <img src="screenshots/21-journal.png" width="200" alt="Journal of notes and moods"> | <img src="screenshots/22-crt-matrix.png" width="200" alt="CRT shader with the Matrix theme"> | <img src="screenshots/23-today-sections.png" width="200" alt="Today grouped into morning, afternoon and evening"> | <img src="screenshots/24-checklist-edit.png" width="200" alt="Editing a checklist habit"> |
 
-| Watch box | `review --year` | Streak insurance | |
+| Vault | `review --year` | Streak insurance | Tokyo Night |
 |:-:|:-:|:-:|:-:|
-| <img src="screenshots/25-watch-box.png" width="200" alt="Watch box grid colour-coded by days since worn"> | <img src="screenshots/26-year-review.png" width="200" alt="Year in review"> | <img src="screenshots/27-streak-insurance.png" width="200" alt="Streak insurance rules"> | |
+| <img src="screenshots/25-watch-box.png" width="200" alt="Watch vault grid colour-coded by days since worn"> | <img src="screenshots/26-year-review.png" width="200" alt="Year in review"> | <img src="screenshots/27-streak-insurance.png" width="200" alt="Streak insurance rules"> | <img src="screenshots/28-theme-tokyo-night.png" width="200" alt="Tokyo Night theme"> |
+
+| Amber CRT · VT323 | Rosé Pine Dawn · Victor Mono | Synthwave '84 · Space Mono | |
+|:-:|:-:|:-:|:-:|
+| <img src="screenshots/29-theme-amber-crt.png" width="200" alt="Amber CRT theme with scanlines"> | <img src="screenshots/30-theme-rose-pine-dawn.png" width="200" alt="Rosé Pine Dawn light theme"> | <img src="screenshots/31-theme-synthwave.png" width="200" alt="Synthwave 84 theme"> | |
 
 Screenshots are rendered from the real screens with demo data by `./gradlew screenshots` (Robolectric, no device needed)
 and double as the golden images for `./gradlew verifyScreenshots`, which CI runs on every push.
@@ -102,4 +106,4 @@ Kotlin · Jetpack Compose (Material 3) · Room · DataStore · Glance · CameraX
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Fonts: JetBrains Mono, Fira Code, Roboto Mono (all [OFL](licenses/)). Logo assets in `docs/logo/`.
+MIT — see [LICENSE](LICENSE). Fonts: JetBrains Mono, Fira Code, Roboto Mono, IBM Plex Mono, Source Code Pro, Victor Mono, Space Mono, VT323 (all [OFL](licenses/)). Logo assets in `docs/logo/`.

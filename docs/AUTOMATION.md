@@ -15,15 +15,15 @@ mood <1-5> [habit]        mood for a habit             timer [min] [habit]  star
 timer stop|pause|resume   control the timer            stopwatch [habit]    count-up session
 tick <habit> <item|n>     tick / untick a checklist item (habit completes when all are ticked)
 wear <watch>              log today's watch            watch next           rotation suggestion
-watch box                 collection grid by neglect   watch stats          collection stats
+watch vault               collection grid by neglect   watch stats          collection stats
 shield <habit>            repair the latest gap        habit add [template] new habit / from template
 remind <habit> 07:30      set / `off` the reminder     remind <habit> checkin on|off   evening check-in
 remind                    list reminders
 away <reason> [3d | yyyy-mm-dd [yyyy-mm-dd]]           streak insurance: auto-skip a date range
 away <reason>             open-ended (until `back`)    away                 list rules
 back                      end every open-ended rule today
-ls · status · review · review year · man · insights · timeline · journal · settings
-theme <name> · dark · light · backup · help
+ls · status · review · review year · achievements · insights · timeline · journal · settings
+theme <name> · font <name|theme> · icon <name> · dark · light · backup · help
 ```
 
 Habits and watches are matched by id, exact name, unique prefix, substring or initials
