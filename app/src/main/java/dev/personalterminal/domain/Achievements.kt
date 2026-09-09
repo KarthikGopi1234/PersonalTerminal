@@ -42,11 +42,19 @@ data class AchievementFacts(
     val distinctWatchesWorn: Int,
     val earlyBirdDays: Int,
     val nightOwlDays: Int,
+    /** Habit strength: best score across active habits and how many sit at ≥ 90. */
+    val bestStrength: Int = 0,
+    val strongHabits: Int = 0,
+    /** Minimum-version days logged (`[~] min`). */
+    val minimumDays: Int = 0,
+    /** Habits stacked after another (`after`). */
+    val stackedHabits: Int = 0,
 ) {
     companion object {
         fun from(habits: List<HabitWithLogs>, xp: Int, sessions: List<FocusSession>, wear: List<WearLog>, watches: Int, today: LocalDate = AppClock.today()): AchievementFacts {
             val logs = habits.flatMap { it.logs }
             val streaks = habits.map { Streaks.compute(it.habit, it.logs, it.shields, today) }
+            val strengths = habits.filter { !it.habit.archived }.map { Strength.compute(it.habit, it.logs, today, it.shields.map { s -> s.day }.toSet()) }
             val byDay = logs.filter { it.completed && !it.skipped }.groupBy { it.day }
             val perfect = byDay.count { (day, ls) ->
                 val d = LocalDate.ofEpochDay(day)
@@ -77,6 +85,10 @@ data class AchievementFacts(
                 distinctWatchesWorn = wear.map { it.watchId }.distinct().size,
                 earlyBirdDays = doneLogs.filter { hourOf(it.updatedAt) < 7 }.map { it.day }.distinct().size,
                 nightOwlDays = doneLogs.filter { hourOf(it.updatedAt) >= 23 }.map { it.day }.distinct().size,
+                bestStrength = strengths.maxOfOrNull { it.score } ?: 0,
+                strongHabits = strengths.count { it.score >= 90 },
+                minimumDays = habits.sumOf { hwl -> hwl.logs.count { l -> !l.skipped && !l.completed && Targets.minimumReached(hwl.habit, l.value, LocalDate.ofEpochDay(l.day)) } },
+                stackedHabits = habits.count { !it.habit.archived && it.habit.anchorId > 0L },
             )
         }
     }
@@ -101,6 +113,10 @@ object Achievements {
             a("perfect1", "2 volume", "clean-build", "perfect-day(1)", "Every scheduled habit done on one day.", f.perfectDays, 1),
             a("perfect30", "2 volume", "green-ci", "perfect-day(30)", "30 perfect days.", f.perfectDays, 30),
             a("habits5", "2 volume", "package-manager", "habit add ×5", "Keep 5 habits active at once.", f.habitsActive, 5),
+            a("strong90", "2 volume", "load-average", "strength(90)", "Bring one habit's strength to 90 %. Strength forgives a miss; it just wants consistency.", f.bestStrength, 90),
+            a("strong3", "2 volume", "high-availability", "strength ≥90 ×3", "Three habits at 90 % strength or more at the same time.", f.strongHabits, 3),
+            a("min10", "2 volume", "two-minute-rule", "min ×10", "Ten days saved by the minimum version. Showing up beats skipping.", f.minimumDays, 10),
+            a("stack1", "2 volume", "pipeline", "after <anchor>", "Stack a habit onto one you already do.", f.stackedHabits, 1),
             // 3 – levels
             a("lvl5", "3 levels", "committer", "level(5)", "Reach level 5.", f.level, 5),
             a("lvl10", "3 levels", "contributor", "level(10)", "Reach level 10.", f.level, 10),

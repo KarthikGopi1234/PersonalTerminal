@@ -58,6 +58,7 @@ object Streaks {
         val e = day.toEpochDay()
         val log = logs.firstOrNull { it.day == e }
         if (log?.completed == true || log?.skipped == true) return null
+        if (log != null && Targets.minimumReached(habit, log.value, day)) return null
         if (shields.any { it.day == e }) return null
         return day
     }
@@ -69,7 +70,8 @@ object Streaks {
         today: LocalDate = AppClock.today(),
         hourNow: Int = AppClock.now().hour,
     ): StreakInfo {
-        val completedDays: Set<Long> = logs.filter { it.completed && !it.skipped }.map { it.day }.toSet()
+        // A day counts when the target was reached *or* the minimum version was (see Targets.minimumReached).
+        val completedDays: Set<Long> = logs.filter { !it.skipped && (it.completed || Targets.minimumReached(habit, it.value, LocalDate.ofEpochDay(it.day))) }.map { it.day }.toSet()
         // Skipped days bridge the chain for free (sick, travelling …) – like a shield that isn't spent.
         val skippedDays: Set<Long> = logs.filter { it.skipped }.map { it.day }.toSet()
         val shieldDays: Set<Long> = shields.map { it.day }.toSet()
@@ -244,6 +246,6 @@ object Streaks {
         return StreakInfo(current, best, completedDays.size, shielded, repairable)
     }
 
-    private fun Long.toLocalDateEpochDay(): Long =
+    internal fun Long.toLocalDateEpochDay(): Long =
         java.time.Instant.ofEpochMilli(this).atZone(java.time.ZoneId.systemDefault()).toLocalDate().toEpochDay()
 }

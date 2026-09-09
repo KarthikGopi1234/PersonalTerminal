@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -30,6 +31,8 @@ import dev.personalterminal.data.db.checklistItems
 import dev.personalterminal.data.db.hasItem
 import dev.personalterminal.domain.Schedule
 import dev.personalterminal.domain.Streaks
+import dev.personalterminal.domain.Targets
+import dev.personalterminal.domain.Strength
 import dev.personalterminal.ui.components.AsciiProgress
 import dev.personalterminal.ui.components.Comment
 import dev.personalterminal.ui.components.ContributionHeatmap
@@ -57,6 +60,8 @@ fun HabitDetailScreen(app: PersonalTerminalApp, nav: NavHostController, habitId:
     val hwl by remember(habitId) { app.habits.observeHabitWithLogs(habitId) }.collectAsStateWithLifecycle(initialValue = null)
     val today = AppClock.today()
     val data = hwl
+    var anchorName by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(data?.habit?.anchorId) { anchorName = data?.habit?.anchorId?.takeIf { it > 0L }?.let { app.habits.habit(it)?.name } }
 
     Column(
         Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -66,8 +71,10 @@ fun HabitDetailScreen(app: PersonalTerminalApp, nav: NavHostController, habitId:
         val h = data.habit
         val color = p.named(h.color)
         val streak = remember(data) { Streaks.compute(h, data.logs, data.shields, today) }
+        val strength = remember(data) { Strength.compute(h, data.logs, today, data.shields.map { it.day }.toSet()) }
         val todayLog = data.logs.firstOrNull { it.day == today.toEpochDay() }
         val value = todayLog?.value ?: 0
+        val target = Targets.target(h, today)
 
         PromptLine("habit show ${h.name}", trailing = if (h.archived) "archived" else null)
 
@@ -106,21 +113,23 @@ fun HabitDetailScreen(app: PersonalTerminalApp, nav: NavHostController, habitId:
                 }
                 h.type == HabitType.COUNTER -> Column {
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Stepper(value = value, onChange = { scope.launch { app.habits.setValue(h.id, it, today) } }, min = 0, max = 100_000, color = color, suffix = "/${h.target}")
+                        Stepper(value = value, onChange = { scope.launch { app.habits.setValue(h.id, it, today) } }, min = 0, max = 100_000, color = color, suffix = "/$target")
                         Spacer(Modifier.weight(1f))
                         Text(h.unit, color = p.fgDim)
                     }
                     Spacer(Modifier.height(6.dp))
-                    AsciiProgress(fraction = value.toFloat() / h.target.coerceAtLeast(1), width = 24, color = color)
+                    AsciiProgress(fraction = value.toFloat() / target.coerceAtLeast(1), width = 24, color = color)
+                    MinimumLine(h, value, target, onMinimum = { scope.launch { app.habits.logMinimum(h.id, today) } })
                 }
                 else -> Column {
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Text("$value / ${h.target} min", color = p.fg, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text("$value / $target min", color = p.fg, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.weight(1f))
                         TermButton("▶ focus" + (if (h.focusMinutes > 0) " ${h.focusMinutes}m" else ""), color = color, onClick = { nav.navigate(Routes.timer(h.id)) })
                     }
                     Spacer(Modifier.height(6.dp))
-                    AsciiProgress(fraction = value.toFloat() / h.target.coerceAtLeast(1), width = 24, color = color)
+                    AsciiProgress(fraction = value.toFloat() / target.coerceAtLeast(1), width = 24, color = color)
+                    MinimumLine(h, value, target, onMinimum = { scope.launch { app.habits.logMinimum(h.id, today) } })
                     Spacer(Modifier.height(6.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(5, 10, 25).forEach { m -> TermButton("+${m}m", color = p.fgDim, onClick = { scope.launch { app.habits.addValue(h.id, m, today) } }) }
@@ -178,9 +187,18 @@ fun HabitDetailScreen(app: PersonalTerminalApp, nav: NavHostController, habitId:
             KeyValue("best", "${streak.best}")
             KeyValue("total completions", "${streak.completions}")
             KeyValue("shielded days", "${streak.shieldedDays}", valueColor = p.cyan)
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                KeyValue("strength", Strength.label(strength), valueColor = if (strength.slipping) p.red else if (strength.score >= 70) p.green else p.yellow, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(10.dp))
+                Text(Strength.sparkline(strength.history, 12), color = if (strength.slipping) p.red else color, style = MaterialTheme.typography.bodyMedium)
+            }
+            if (strength.slipping) Comment("slipping – one done day earns back ~7 pts; set a minimum so thin days still count")
             KeyValue("schedule", Schedule.describe(h) + if (h.negative) " · avoid" else "")
             if (h.type == HabitType.CHECKLIST) KeyValue("items", h.checklistItems.joinToString(" · "))
-            else if (h.type != HabitType.CHECKBOX) KeyValue("target", "${h.target} ${h.unit}".trim())
+            else if (h.type != HabitType.CHECKBOX) KeyValue("target", "$target ${h.unit}".trim() + (Targets.rampLabel(h, today)?.let { " · ↗ $it" } ?: ""))
+            if (h.minTarget > 0) KeyValue("minimum", "${h.minTarget} ${h.unit} keeps the streak ([~] min)".trim(), valueColor = p.yellow)
+            if (h.anchorId > 0L) KeyValue("stacked after", (anchorName ?: "#${h.anchorId}") + if (h.anchorRemind) " · nudged when ticked" else "", valueColor = p.cyan)
+            dev.personalterminal.domain.Areas.byId(h.area)?.let { KeyValue("area", "${it.glyph} ${it.label}") }
             if (h.reminderMinutes >= 0) KeyValue("reminder", "%02d:%02d".format(h.reminderMinutes / 60, h.reminderMinutes % 60))
             val skips = data.logs.count { it.skipped }
             if (skips > 0) KeyValue("skipped days", "$skips")
@@ -229,5 +247,18 @@ fun HabitDetailScreen(app: PersonalTerminalApp, nav: NavHostController, habitId:
         }
         Comment("created ${java.time.Instant.ofEpochMilli(h.createdAt).atZone(java.time.ZoneId.systemDefault()).toLocalDate().format(DateTimeFormatter.ISO_DATE)}")
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+/** `[~ min 2]` button under the bar while the minimum version is still reachable, `[~] min ✓` once it is. */
+@Composable
+private fun MinimumLine(h: dev.personalterminal.data.db.Habit, value: Int, target: Int, onMinimum: () -> Unit) {
+    if (h.minTarget <= 0) return
+    val p = Term.palette
+    Spacer(Modifier.height(4.dp))
+    when {
+        value >= target -> {}
+        value >= h.minTarget -> Text("[~] min ✓ · streak safe, ${target - value} ${h.unit} to the full target".trim(), color = p.yellow, style = MaterialTheme.typography.labelSmall)
+        else -> Text("[~ min ${h.minTarget}]  log the minimum version", color = p.yellow, style = MaterialTheme.typography.labelSmall, modifier = Modifier.clickable(onClick = onMinimum).padding(vertical = 2.dp))
     }
 }

@@ -3,7 +3,7 @@
 Ideas for where Personal Terminal can go next, grouped by theme and roughly ordered by
 value-for-effort inside each group. Effort: **S** = an evening, **M** = a weekend, **L** = a multi-week feature.
 
-**Status (0.3.4):** everything marked ✅ has shipped – see the release notes and
+**Status (0.3.5):** everything marked ✅ has shipped – see the release notes and
 [docs/AUTOMATION.md](AUTOMATION.md) for the command line / intent API. Unmarked rows are still open.
 
 **Scope note.** Personal Terminal is a *personal-use* project that leans heavily on the ideas in
@@ -25,6 +25,11 @@ have been removed rather than left open.
 | 1.8 ✅ | **Streak insurance rules**: auto-skip date ranges (`away travel 3d`, open-ended until `back`) or weekly rest days, per habit or global – the chain survives without spending a shield | Travel and sick days should not cost a 90-day streak | M |
 | 1.9 ✅ | **Repair window, pause-until, weekly-quota nudge** (0.3.4): an unlogged previous day can be ticked late until noon without a shield (`yesterday <habit>`); `pause run 2w` hides a habit until a date and bridges the streak; `x/week` rows read `2/3 · last chance today` and the evening notice includes them | The three most common ways a streak "breaks" without the habit actually being missed | S |
 | 1.10 ✅ | **Morning briefing** (opt-in, one line at 07:30): habits due, sleep, watch suggestion, streaks at risk, unlogged yesterday | Replaces several nudges with one glanceable line | S |
+| 1.11 ✅ | **Habit strength** (0.3.5): a forgiving exponentially-weighted rate next to the streak (one miss ≈ −7, one day back ≈ +7), sparkline + trend arrow on the detail screen, profile and review, `strength` at the prompt, "weakest first" sort on Today, `slipping:` line in the review, four new achievements | Streaks are binary; strength shows a habit fading *before* the chain breaks | M |
+| 1.12 ✅ | **Minimum version & ramping targets** (0.3.5): `min read 2` – reaching the floor logs a partial `[~] min` day that keeps the streak (half XP, counted separately in `stats`); `ramp read 30 8` – the effective target grows one step a week from the stored value, every day judged against *its* target | The two-minute rule and progressive overload as fields, not discipline | M |
+| 1.13 ✅ | **Habit stacking** (0.3.5): `after journal read` anchors a habit to one you already do – Today shows the chain `read → journal`, greys the follower until the anchor is ticked and (optionally) fires the follower's reminder the moment the anchor completes | "After I X, I will Y" is the most reliable cue there is | S |
+| 1.14 ✅ | **Comeback nudge & evening summary** (0.3.5): after three quiet days one line (`quiet for 4 days · 3 habits waiting · 2 shields ready`) with ×2 back-off that resets on the first log; an opt-in 21:30 summary (`4/6 done · open: read, journal`) replaces N per-habit check-ins | Coming back should be cheap; nagging is not the same as helping | S |
+| 1.15 ✅ | **Life areas** (0.3.5): body / mind / work / people / home / money per habit; the weekly review and `area` draw a six-spoke ASCII radar of the week's balance | "8 of 10 done" hides *which* part of life got the 2 | S |
 | 1.8 ✅ | **Evening check-in** per habit ("did you do X today?" with done / skip actions), **streak-at-risk** notice, **wear-log** notice, and a **per-notification settings matrix** (each kind switchable with its own time, one master switch, shared quiet hours) | Reminders nudge *before*; check-ins catch what was done but never logged – and nobody wants all of them | M |
 
 ## 2. Focus timer
@@ -117,4 +122,4 @@ have been removed rather than left open.
 2. **Wrist-shot camera frame (3.9)** – rule-of-thirds overlay and an EXIF stamp with the watch name.
 3. **Multi-device sync (7.3)** – encrypted backups + Drive folder give it a base to stand on.
 
-Further candidates — ramping targets, a wrist-shot contact sheet, service warnings at wear time, SQLite export, a "done next habit" quick tile, habit dependencies and a vault widget — live in [IDEAS.md](IDEAS.md) with an honest effort estimate for each (the eight ideas shipped in 0.3.4 are ticked there).
+Further candidates — a wrist-shot contact sheet, service warnings at wear time, SQLite export, a "done next habit" quick tile and a vault widget — live in [IDEAS.md](IDEAS.md) with an honest effort estimate for each, together with the **B-list** of next majors (0.3.6 watch lifecycle / wishlist / `uptime` / rotation challenges → 0.3.7 ambient sounds / ASCII garden / screensaver / app lock → 0.4.0 challenges / collection report). The 0.3.5 bundle (strength, minimum & ramp, stacking, comeback nudge, evening summary, life areas) is ticked there.

@@ -50,6 +50,8 @@ open class PersonalTerminalApp : Application() {
             WorkManager.initialize(this, Configuration.Builder().setMinimumLoggingLevel(android.util.Log.INFO).build())
         }
         createChannels()
+        // Habit stacking: a follower's reminder fires when its anchor is ticked (see Stacks / ReminderScheduler).
+        habits.onAnchorCompleted = { anchor, date -> dev.personalterminal.reminders.ReminderScheduler.onAnchorCompleted(this, anchor, date) }
 
         scope.launch {
             // First launch: seed a friendly starter set.
@@ -64,6 +66,7 @@ open class PersonalTerminalApp : Application() {
             runCatching { habits.applySkipRules() }
             runCatching { dev.personalterminal.reminders.ReminderScheduler.reschedule(this@PersonalTerminalApp) }
             runCatching { dev.personalterminal.reminders.WatchServiceReminder.schedule(this@PersonalTerminalApp) }
+            runCatching { dev.personalterminal.reminders.ComebackNudge.schedule(this@PersonalTerminalApp) }
             runCatching { dev.personalterminal.health.HealthSync.schedule(this@PersonalTerminalApp, s.healthConnect) }
             if (s.healthConnect) runCatching { dev.personalterminal.health.HealthSync.syncNow(this@PersonalTerminalApp) }
             runCatching { AppShortcuts.publish(this@PersonalTerminalApp) }

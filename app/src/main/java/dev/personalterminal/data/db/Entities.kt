@@ -101,6 +101,27 @@ data class Habit(
     @ColumnInfo(defaultValue = "0") val pausedUntil: Long = 0L,
     /** First paused epoch day (the day the pause was set) – history before it is untouched. */
     @ColumnInfo(defaultValue = "0") val pausedFrom: Long = 0L,
+    /**
+     * Minimum version (counter / timer): reaching this value without reaching the target keeps the
+     * streak as a partial day (`[~] min`). 0 = no minimum. See [dev.personalterminal.domain.Targets].
+     */
+    @ColumnInfo(defaultValue = "0") val minTarget: Int = 0,
+    /** Ramp: the target grows linearly from [target] to [rampTo] over [rampWeeks] weeks starting on [rampStartDay]. 0 = no ramp. */
+    @ColumnInfo(defaultValue = "0") val rampTo: Int = 0,
+    @ColumnInfo(defaultValue = "0") val rampWeeks: Int = 0,
+    @ColumnInfo(defaultValue = "0") val rampStartDay: Long = 0L,
+    /**
+     * Habit stacking: id of the anchor habit this one follows (`after meditate`). Today greys the
+     * follower until the anchor is done and the reminder can fire *when the anchor completes*
+     * ([anchorRemind]) instead of at a clock time. 0 = none.
+     */
+    @ColumnInfo(defaultValue = "0") val anchorId: Long = 0L,
+    @ColumnInfo(defaultValue = "0") val anchorRemind: Boolean = false,
+    /**
+     * Life area for the balance radar: body / mind / work / people / home / money ("" = none).
+     * See [dev.personalterminal.domain.Areas].
+     */
+    @ColumnInfo(defaultValue = "''") val area: String = "",
 )
 
 /** True when [epochDay] falls inside the habit's pause window `[pausedFrom, pausedUntil)`. */

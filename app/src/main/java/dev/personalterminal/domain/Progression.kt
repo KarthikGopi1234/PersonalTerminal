@@ -17,10 +17,13 @@ object Progression {
     const val XP_COMPLETE = 10
     const val XP_STREAK_WEEK = 25
     const val XP_PERFECT_DAY = 20
+    /** Minimum version reached (half a completion). */
+    const val XP_MINIMUM = 5
 
     const val REASON_COMPLETE = "complete"
     const val REASON_STREAK = "streak"
     const val REASON_PERFECT_DAY = "perfect_day"
+    const val REASON_MINIMUM = "minimum"
 
     /** Total XP required to *reach* [level] (level 1 = 0 XP). */
     fun xpForLevel(level: Int): Int = if (level <= 1) 0 else 50 * (level - 1) * level

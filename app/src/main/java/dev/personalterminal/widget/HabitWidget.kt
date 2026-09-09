@@ -145,8 +145,8 @@ class HabitWidget : GlanceAppWidget() {
         val label = when {
             h.negative -> h.name
             h.type == HabitType.CHECKBOX -> h.name
-            h.type == HabitType.COUNTER || h.type == HabitType.CHECKLIST -> "${h.name} ${hs.value}/${h.target}"
-            else -> "${h.name} ${hs.value}/${h.target}m"
+            h.type == HabitType.COUNTER || h.type == HabitType.CHECKLIST -> "${h.name} ${hs.value}/${hs.target}"
+            else -> "${h.name} ${hs.value}/${hs.target}m"
         }
         val box = when {
             hs.skipped -> "[»]"

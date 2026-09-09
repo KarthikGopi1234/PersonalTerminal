@@ -22,7 +22,7 @@ class Converters {
         Routine::class, Habit::class, HabitLog::class, ShieldUse::class, Watch::class, WearLog::class, XpEvent::class,
         FocusSession::class, WatchService::class, AccuracyReading::class, Strap::class, SkipRule::class, SleepLog::class, StrapSwap::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -67,10 +67,23 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun get(context: Context): AppDatabase = INSTANCE ?: synchronized(this) {
             INSTANCE ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
                 .also { INSTANCE = it }
+        }
+
+        /** 0.3.4 → 0.3.5: minimum version + ramping targets, habit stacking anchors, life areas. Additive only. */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE habits ADD COLUMN minTarget INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE habits ADD COLUMN rampTo INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE habits ADD COLUMN rampWeeks INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE habits ADD COLUMN rampStartDay INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE habits ADD COLUMN anchorId INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE habits ADD COLUMN anchorRemind INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE habits ADD COLUMN area TEXT NOT NULL DEFAULT ''")
+            }
         }
 
         /** 0.3.3 → 0.3.4: habit pause with a return date, sleep anchors, strap swap log. Additive only. */

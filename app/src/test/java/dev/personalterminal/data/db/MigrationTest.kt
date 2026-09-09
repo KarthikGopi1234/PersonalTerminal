@@ -27,7 +27,7 @@ class MigrationTest {
     val helper = MigrationTestHelper(InstrumentationRegistry.getInstrumentation(), AppDatabase::class.java, emptyList(), FrameworkSQLiteOpenHelperFactory())
 
     @Test
-    fun `1 to 5 keeps data and matches the exported schema`() {
+    fun `1 to 6 keeps data and matches the exported schema`() {
         helper.createDatabase(dbName, 1).apply {
             execSQL("INSERT INTO routines (id, name, icon, position, createdAt) VALUES (1, 'morning', '☼', 0, 1)")
             execSQL("INSERT INTO habits (id, name, type, target, unit, schedule, daysMask, timesPerWeek, routineId, color, position, archived, createdAt, notes) VALUES (1, 'stretch', 'CHECKBOX', 1, '', 'DAILY', 127, 3, 1, 'green', 0, 0, 1, '')")
@@ -36,13 +36,16 @@ class MigrationTest {
             execSQL("INSERT INTO wear_logs (id, watchId, day, photoPath, note, createdAt) VALUES (1, 1, 20000, NULL, '', 1)")
             close()
         }
-        // validateDroppedTables = true → any difference to 5.json fails the test
-        val db = helper.runMigrationsAndValidate(dbName, 5, true, AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
+        // validateDroppedTables = true → any difference to 6.json fails the test
+        val db = helper.runMigrationsAndValidate(dbName, 6, true, AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6)
         db.query("SELECT negative, reminderMinutes, healthMetric, checkIn FROM habits WHERE id = 1").use { c ->
             assertTrue(c.moveToFirst()); assertEquals(0, c.getInt(0)); assertEquals(-1, c.getInt(1)); assertEquals("", c.getString(2)); assertEquals(0, c.getInt(3))
         }
         db.query("SELECT skipped, note, mood, items, ruleId FROM habit_logs").use { c -> assertTrue(c.moveToFirst()); assertEquals(0, c.getInt(0)); assertEquals("", c.getString(1)); assertEquals(0, c.getInt(2)); assertEquals(0L, c.getLong(3)); assertEquals(0L, c.getLong(4)) }
         db.query("SELECT checklist, timeOfDay, pausedUntil FROM habits WHERE id = 1").use { c -> assertTrue(c.moveToFirst()); assertEquals("", c.getString(0)); assertEquals("", c.getString(1)); assertEquals(0L, c.getLong(2)) }
+        db.query("SELECT minTarget, rampTo, rampWeeks, rampStartDay, anchorId, anchorRemind, area FROM habits WHERE id = 1").use { c ->
+            assertTrue(c.moveToFirst()); assertEquals(0, c.getInt(0)); assertEquals(0, c.getInt(1)); assertEquals(0, c.getInt(2)); assertEquals(0L, c.getLong(3)); assertEquals(0L, c.getLong(4)); assertEquals(0, c.getInt(5)); assertEquals("", c.getString(6))
+        }
         db.query("SELECT COUNT(*) FROM skip_rules").use { c -> assertTrue(c.moveToFirst()); assertEquals(0, c.getInt(0)) }
         db.query("SELECT COUNT(*) FROM strap_swaps").use { c -> assertTrue(c.moveToFirst()); assertEquals(0, c.getInt(0)) } // no straps → nothing seeded
         db.query("SELECT COUNT(*) FROM sleep_logs").use { c -> assertTrue(c.moveToFirst()); assertEquals(0, c.getInt(0)) }
@@ -52,7 +55,7 @@ class MigrationTest {
 
         // And Room itself opens the migrated file happily with the real DAOs.
         val room = Room.databaseBuilder(ApplicationProvider.getApplicationContext(), AppDatabase::class.java, dbName)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5).allowMainThreadQueries().build()
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6).allowMainThreadQueries().build()
         runBlocking {
             assertEquals(1, room.habitDao().getAll().size)
             room.habitDao().update(room.habitDao().getById(1)!!.copy(checkIn = true, type = HabitType.CHECKLIST, checklist = "shoes\ntowel", timeOfDay = "MORNING"))
@@ -69,6 +72,11 @@ class MigrationTest {
             assertEquals("travel", room.skipRuleDao().getById(id)!!.name)
             room.sleepDao().upsert(SleepLog(day = 20011, bedMinutes = -45, wakeMinutes = 400))
             assertEquals(445, dev.personalterminal.domain.Sleep.durationMinutes(room.sleepDao().get(20011)))
+            room.habitDao().update(room.habitDao().getById(1)!!.copy(type = HabitType.COUNTER, target = 10, minTarget = 2, rampTo = 30, rampWeeks = 8, rampStartDay = 20000, anchorId = 1, area = "mind"))
+            val h = room.habitDao().getById(1)!!
+            assertEquals(2, h.minTarget); assertEquals(30, h.rampTo); assertEquals("mind", h.area)
+            assertEquals(10, dev.personalterminal.domain.Targets.target(h, java.time.LocalDate.ofEpochDay(20000)))
+            assertEquals(30, dev.personalterminal.domain.Targets.target(h, java.time.LocalDate.ofEpochDay(20000 + 8 * 7)))
         }
         room.close()
     }
@@ -118,6 +126,20 @@ class MigrationTest {
         db.query("SELECT COUNT(*) FROM strap_swaps").use { c -> assertTrue(c.moveToFirst()); assertEquals(1, c.getInt(0)) } // only the seeded fit
         db.execSQL("INSERT INTO sleep_logs (day, bedMinutes, wakeMinutes, source, note, updatedAt) VALUES (20700, -30, 405, 'manual', '', 1)")
         db.query("SELECT bedMinutes, wakeMinutes FROM sleep_logs WHERE day = 20700").use { c -> assertTrue(c.moveToFirst()); assertEquals(-30, c.getInt(0)); assertEquals(405, c.getInt(1)) }
+        db.close()
+    }
+
+    @Test
+    fun `5 to 6 adds minimum, ramp, anchor and area columns with defaults`() {
+        val name = "migration-5-6.db"
+        helper.createDatabase(name, 5).apply {
+            execSQL("INSERT INTO habits (id, name, type, target, unit, schedule, daysMask, timesPerWeek, routineId, color, position, archived, createdAt, notes, negative, reminderMinutes, focusMinutes, breakMinutes, healthMetric, checkIn, checklist, timeOfDay, pausedUntil, pausedFrom) VALUES (21, 'read', 'COUNTER', 20, 'pages', 'DAILY', 127, 3, NULL, 'cyan', 0, 0, 1, '', 0, -1, 0, 0, '', 0, '', '', 0, 0)")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(name, 6, true, AppDatabase.MIGRATION_5_6)
+        db.query("SELECT minTarget, rampTo, rampWeeks, rampStartDay, anchorId, anchorRemind, area, target FROM habits WHERE id = 21").use { c ->
+            assertTrue(c.moveToFirst()); assertEquals(0, c.getInt(0)); assertEquals(0, c.getInt(1)); assertEquals(0, c.getInt(2)); assertEquals(0L, c.getLong(3)); assertEquals(0L, c.getLong(4)); assertEquals(0, c.getInt(5)); assertEquals("", c.getString(6)); assertEquals(20, c.getInt(7))
+        }
         db.close()
     }
 }

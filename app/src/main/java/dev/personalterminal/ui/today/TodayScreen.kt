@@ -48,6 +48,8 @@ import dev.personalterminal.domain.DaySummary
 import dev.personalterminal.domain.HabitStatus
 import dev.personalterminal.domain.Progression
 import dev.personalterminal.domain.Schedule
+import dev.personalterminal.domain.Targets
+import dev.personalterminal.domain.Stacks
 import dev.personalterminal.ui.components.AsciiProgress
 import dev.personalterminal.ui.components.BracketCheckbox
 import dev.personalterminal.ui.components.Comment
@@ -159,8 +161,11 @@ fun TodayScreen(app: PersonalTerminalApp, nav: NavHostController) {
             TimeOfDay.entries.mapNotNull { t -> bySection[t]?.let { Block("tod-${t.name}", t.glyph, t.label, if (t == nowSection && isToday) p.yellow else p.purple, it, current = t == nowSection && isToday) } }
         } else s.groups.map { g -> Block("routine-${g.routine?.id ?: -1}", g.routine?.icon ?: ">", g.name, p.purple, g.habits) }
 
+        val byId = s.all.associate { it.habit.id to it.habit }
         blocks.forEach { group ->
-            val dueHabits = group.habits.filter { it.isDueToday }
+            val dueRaw = group.habits.filter { it.isDueToday }
+            // stack order (anchors first), then optionally weakest first
+            val dueHabits = (if (settings.todaySort == "strength") s.weakestFirst(dueRaw) else dueRaw).sortedBy { Stacks.depth(it.habit, byId) }
             val offDay = group.habits.filter { !it.isDueToday }
             if (dueHabits.isEmpty() && offDay.isEmpty()) return@forEach
             item(key = group.key) {
@@ -190,6 +195,9 @@ fun TodayScreen(app: PersonalTerminalApp, nav: NavHostController) {
                     onAnnotate = { note, mood -> scope.launch { app.habits.annotate(hs.habit.id, date, note = note, mood = mood) } },
                     onLateLog = { day -> scope.launch { app.habits.logLate(hs.habit.id, day) } },
                     isToday = isToday,
+                    waitingOn = Stacks.waitingOn(hs, s.all),
+                    chain = Stacks.chainLabel(hs, s.all),
+                    onMinimum = { scope.launch { app.habits.logMinimum(hs.habit.id, date) } },
                 )
             }
             if (offDay.isNotEmpty()) {
@@ -283,7 +291,7 @@ private fun SummaryPanel(s: DaySummary, onShieldInfo: () -> Unit) {
         }
         Spacer(Modifier.height(4.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("${s.done}/${s.due.size} done", color = p.fg, style = MaterialTheme.typography.bodyMedium)
+            Text("${s.done}/${s.due.size} done" + if (s.partial > 0) " · ${s.partial} min" else "", color = p.fg, style = MaterialTheme.typography.bodyMedium)
             Text("lvl ${lp.level} · ${s.totalXp} xp", color = p.purple, style = MaterialTheme.typography.bodyMedium)
             Text("⛨ ${s.shieldsAvailable}", color = if (s.shieldsAvailable > 0) p.cyan else p.fgDim, style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.clickable(onClick = onShieldInfo))
@@ -314,15 +322,22 @@ fun HabitRow(
     onAnnotate: (String?, Int?) -> Unit = { _, _ -> },
     onLateLog: (LocalDate) -> Unit = {},
     isToday: Boolean = true,
+    /** Habit stacking: the unfinished anchor this row waits on (row is dimmed until it is ticked). */
+    waitingOn: HabitStatus? = null,
+    /** `meditate → journal → stretch` when the habit is part of a stack. */
+    chain: String? = null,
+    onMinimum: () -> Unit = {},
 ) {
     val p = Term.palette
     val color = p.named(hs.habit.color)
     val h = hs.habit
     val struck = hs.completed && !h.negative
+    val waiting = waitingOn != null && !hs.completed && !hs.skipped
     Column(
         Modifier
             .fillMaxWidth()
             .background(if (hs.completed || hs.skipped) p.bgAlt.copy(alpha = 0.5f) else p.bgAlt, RoundedCornerShape(6.dp))
+            .then(if (waiting) Modifier.alpha(0.55f) else Modifier)
             .combinedClickable(onClick = { if (h.type == HabitType.CHECKBOX && !h.negative && !hs.skipped) onToggle() else onExpand() }, onLongClick = onExpand)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
@@ -331,7 +346,7 @@ fun HabitRow(
                 hs.skipped -> Text("[»]", color = p.fgDim, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = onUnskip))
                 h.negative -> Text(if (hs.slipped) "[✗]" else "[✓]", color = if (hs.slipped) p.red else color, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold,
                     modifier = Modifier.clickable(onClick = onToggle))
-                else -> BracketCheckbox(checked = hs.completed, partial = hs.value > 0 && !hs.completed, color = color,
+                else -> BracketCheckbox(checked = hs.completed, partial = hs.partial || (hs.value > 0 && !hs.completed), color = if (hs.partial) p.yellow else color,
                     modifier = Modifier.clickable(onClick = onToggle))
             }
             Spacer(Modifier.width(10.dp))
@@ -358,9 +373,16 @@ fun HabitRow(
                         else -> p.fgDim
                     }
                     Text(sched, color = schedColor, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (hs.partial) Text("[~] min", color = p.yellow, style = MaterialTheme.typography.labelSmall)
+                    hs.strength?.takeIf { it.slipping && !hs.completed }?.let { Text("↓${it.score}%", color = p.red, style = MaterialTheme.typography.labelSmall) }
                     if (hs.mood > 0) Text("★".repeat(hs.mood), color = p.yellow, style = MaterialTheme.typography.labelSmall)
                     if (hs.note.isNotBlank()) Text("✎", color = p.cyan, style = MaterialTheme.typography.labelSmall)
-                    if (h.reminderMinutes >= 0) Text("⏰", color = p.fgDim, style = MaterialTheme.typography.labelSmall)
+                    if (h.reminderMinutes >= 0 || (h.anchorId > 0L && h.anchorRemind)) Text("⏰", color = p.fgDim, style = MaterialTheme.typography.labelSmall)
+                }
+                val ramp = if (h.type == HabitType.COUNTER || h.type == HabitType.TIMER) Targets.rampLabel(h, AppClock.today()) else null
+                if (chain != null || ramp != null) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (chain != null) Text((if (waiting) "⌛ " else "⛓ ") + chain, color = if (waiting) p.yellow else p.fgDim, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    if (ramp != null) Text("↗ $ramp", color = p.purple, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             when (h.type) {
@@ -369,11 +391,11 @@ fun HabitRow(
                 HabitType.COUNTER -> Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("[-]", color = if (hs.value > 0) color else p.fgDim, style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.clickable(enabled = hs.value > 0, onClick = onDecrement).padding(4.dp))
-                    Text("${hs.value}/${h.target}", color = p.fg, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    Text("${hs.value}/${hs.target}", color = p.fg, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                     Text("[+]", color = color, style = MaterialTheme.typography.titleMedium, modifier = Modifier.clickable(onClick = onIncrement).padding(4.dp))
                 }
                 HabitType.TIMER -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("${hs.value}/${h.target}m", color = p.fg, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    Text("${hs.value}/${hs.target}m", color = p.fg, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.width(6.dp))
                     Text("[▶]", color = color, style = MaterialTheme.typography.titleMedium, modifier = Modifier.clickable(onClick = onTimer).padding(4.dp))
                 }
@@ -393,7 +415,13 @@ fun HabitRow(
             }
         } else if (h.type != HabitType.CHECKBOX) {
             Spacer(Modifier.height(4.dp))
-            AsciiProgress(fraction = hs.fraction, width = 20, color = color, showPercent = true, label = h.unit.ifBlank { null })
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AsciiProgress(fraction = hs.fraction, width = 20, color = if (hs.partial) p.yellow else color, showPercent = true, label = h.unit.ifBlank { null }, modifier = Modifier.weight(1f))
+                if (h.minTarget > 0 && !hs.completed && !hs.skipped && hs.value < h.minTarget) {
+                    Text("[~ min ${h.minTarget}]", color = p.yellow, style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.clickable(onClick = onMinimum).padding(start = 6.dp, top = 2.dp, bottom = 2.dp))
+                }
+            }
         }
         val late = hs.streak.lateLogDay
         val repair = hs.streak.repairableDay

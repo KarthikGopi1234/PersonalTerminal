@@ -16,7 +16,7 @@ object Insights {
 
     // ------------------------------------------------------------------ weekly review
 
-    data class HabitWeek(val habit: Habit, val done: Int, val scheduled: Int, val prevDone: Int, val prevScheduled: Int, val streak: Int, val totalValue: Int) {
+    data class HabitWeek(val habit: Habit, val done: Int, val scheduled: Int, val prevDone: Int, val prevScheduled: Int, val streak: Int, val totalValue: Int, val strength: Strength.Result? = null) {
         val rate: Float get() = if (scheduled == 0) 0f else done.toFloat() / scheduled
         val prevRate: Float get() = if (prevScheduled == 0) 0f else prevDone.toFloat() / prevScheduled
         val delta: Int get() = ((rate - prevRate) * 100).roundToInt()
@@ -36,12 +36,20 @@ object Insights {
         val skipped: Int,
         val bestDay: Pair<LocalDate, Int>?,
         val moodAvg: Float?,
+        /** Life-area balance for the week (empty when no habit has an area). */
+        val areas: List<Areas.Score> = emptyList(),
+        /** Days this week where only the minimum version was reached. */
+        val minimumDays: Int = 0,
     ) {
         val rate: Float get() = if (scheduled == 0) 0f else done.toFloat() / scheduled
         val prevRate: Float get() = if (prevScheduled == 0) 0f else prevDone.toFloat() / prevScheduled
         val delta: Int get() = ((rate - prevRate) * 100).roundToInt()
         val mvp: HabitWeek? get() = habits.filter { it.scheduled > 0 }.maxWithOrNull(compareBy({ it.rate }, { it.streak }))
         val needsLove: HabitWeek? get() = habits.filter { it.scheduled >= 2 }.minByOrNull { it.rate }?.takeIf { it.rate < 0.6f }
+        /** Weakest habit by strength (the forgiving score), when it is slipping. */
+        val weakest: HabitWeek? get() = habits.filter { it.strength != null }.minByOrNull { it.strength!!.score }?.takeIf { it.strength!!.slipping }
+        /** Average strength across habits – the "how solid is the whole system" number. */
+        val strengthAvg: Int? get() = habits.mapNotNull { it.strength?.score }.takeIf { it.isNotEmpty() }?.average()?.roundToInt()
     }
 
     fun weekReview(
@@ -60,11 +68,12 @@ object Insights {
             val logs = hwl.logs.associateBy { it.day }
             fun scheduled(ds: List<LocalDate>) = if (h.schedule == dev.personalterminal.data.db.ScheduleType.WEEKLY) h.timesPerWeek.coerceAtMost(ds.size)
             else ds.count { d -> Schedule.isDue(h, d) && logs[d.toEpochDay()]?.skipped != true }
-            fun done(ds: List<LocalDate>) = ds.count { d -> logs[d.toEpochDay()]?.let { it.completed && !it.skipped } == true || (h.negative && Schedule.isDue(h, d) && d.isBefore(today) && logs[d.toEpochDay()].let { it == null || (it.completed && !it.skipped) }) }
+            fun done(ds: List<LocalDate>) = ds.count { d -> logs[d.toEpochDay()]?.let { (it.completed || Targets.minimumReached(h, it.value, d)) && !it.skipped } == true || (h.negative && Schedule.isDue(h, d) && d.isBefore(today) && logs[d.toEpochDay()].let { it == null || (it.completed && !it.skipped) }) }
             val value = days.sumOf { d -> logs[d.toEpochDay()]?.takeIf { it.completed || h.type != HabitType.CHECKBOX }?.value ?: 0 }
             HabitWeek(h, done(days).coerceAtMost(scheduled(days).coerceAtLeast(done(days))), scheduled(days), done(prevDays), scheduled(prevDays),
-                Streaks.compute(h, hwl.logs, hwl.shields, today).current, value)
+                Streaks.compute(h, hwl.logs, hwl.shields, today).current, value, Strength.compute(h, hwl.logs, today, hwl.shields.map { it.day }.toSet()))
         }.filter { it.scheduled > 0 || it.prevScheduled > 0 }
+        val minimumDays = habits.sumOf { hwl -> hwl.logs.count { l -> !l.skipped && !l.completed && l.day in weekStart.toEpochDay()..weekEnd.toEpochDay() && Targets.minimumReached(hwl.habit, l.value, LocalDate.ofEpochDay(l.day)) } }
         val doneByDay = days.associateWith { d -> habits.count { hwl -> hwl.logs.any { it.day == d.toEpochDay() && it.completed && !it.skipped } } }
         val perfect = days.count { d ->
             val due = habits.filter { Schedule.isDue(it.habit, d) && it.logs.none { l -> l.day == d.toEpochDay() && l.skipped } }
@@ -81,6 +90,8 @@ object Insights {
             skipped = habits.sumOf { hwl -> hwl.logs.count { it.skipped && it.day in weekStart.toEpochDay()..weekEnd.toEpochDay() } },
             bestDay = doneByDay.maxByOrNull { it.value }?.takeIf { it.value > 0 }?.toPair(),
             moodAvg = moods.takeIf { it.isNotEmpty() }?.average()?.toFloat(),
+            areas = Areas.balance(habits.map { it.habit to it.logs }, weekStart, minOf(weekEnd, today)),
+            minimumDays = minimumDays,
         )
     }
 
@@ -97,6 +108,7 @@ object Insights {
         sb.appendLine(line("${bar(r.rate, 20)} ${(r.rate * 100).roundToInt()}%"))
         sb.appendLine(line("${r.done}/${r.scheduled} done · ${if (r.delta >= 0) "+" else ""}${r.delta}% vs last wk"))
         sb.appendLine(line("perfect days ${r.perfectDays} · xp +${r.xpEarned}"))
+        r.strengthAvg?.let { sb.appendLine(line("strength avg $it%" + (if (r.minimumDays > 0) " · [~] min ×${r.minimumDays}" else ""))) }
         if (r.focusMinutes > 0) sb.appendLine(line("focus ${r.focusMinutes / 60}h ${r.focusMinutes % 60}m"))
         if (r.moodAvg != null) sb.appendLine(line("mood ${"★".repeat(r.moodAvg.roundToInt())}${"☆".repeat(5 - r.moodAvg.roundToInt())} ${"%.1f".format(r.moodAvg)}"))
         sb.appendLine("├" + "─".repeat(w - 2) + "┤")
@@ -106,6 +118,12 @@ object Insights {
         }
         r.mvp?.let { sb.appendLine(line("mvp: ${it.habit.name}")) }
         r.needsLove?.let { sb.appendLine(line("needs love: ${it.habit.name}")) }
+        r.weakest?.let { if (it != r.needsLove) sb.appendLine(line("slipping: ${it.habit.name} ${it.strength!!.score}% ${it.strength.arrow}")) }
+        if (r.areas.isNotEmpty()) {
+            sb.appendLine("├" + "─".repeat(w - 2) + "┤")
+            Areas.radar(r.areas).lines().forEach { sb.appendLine(line(it)) }
+            sb.appendLine(line(Areas.summary(r.areas).take(w - 4)))
+        }
         sb.appendLine("└" + "─".repeat(w - 2) + "┘")
         return sb.toString().trimEnd()
     }
@@ -117,7 +135,7 @@ object Insights {
             l.skipped -> 0.15f
             habit.negative -> if (!l.completed && l.value > 0) 0.05f else 1f
             habit.type == HabitType.CHECKBOX -> if (l.completed) 1f else 0f
-            else -> (l.value.toFloat() / habit.target.coerceAtLeast(1)).coerceIn(0f, 1f)
+            else -> (l.value.toFloat() / Targets.target(habit, LocalDate.ofEpochDay(l.day)).coerceAtLeast(1)).coerceIn(0f, 1f)
         }
     }
 

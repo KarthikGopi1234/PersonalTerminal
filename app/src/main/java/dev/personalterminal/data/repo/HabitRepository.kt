@@ -24,6 +24,8 @@ import dev.personalterminal.domain.Schedule
 import dev.personalterminal.domain.SkipRules
 import dev.personalterminal.domain.StreakInfo
 import dev.personalterminal.domain.Streaks
+import dev.personalterminal.domain.Strength
+import dev.personalterminal.domain.Targets
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -52,6 +54,7 @@ class HabitRepository(private val db: AppDatabase) {
 
     fun observeRoutines(): Flow<List<Routine>> = routineDao.observeAll()
     fun observeHabits(): Flow<List<Habit>> = habitDao.observeAll()
+    fun observeActiveHabits(): Flow<List<Habit>> = habitDao.observeActive()
     fun observeHabit(id: Long): Flow<Habit?> = habitDao.observeById(id)
     fun observeHabitWithLogs(id: Long): Flow<HabitWithLogs?> = habitDao.observeWithLogs(id)
     fun observeTotalXp(): Flow<Int> = xpDao.observeTotal()
@@ -110,8 +113,13 @@ class HabitRepository(private val db: AppDatabase) {
             hwl.habit.schedule == ScheduleType.WEEKLY -> weekCount < hwl.habit.timesPerWeek || log?.completed == true
             else -> Schedule.isDue(hwl.habit, date)
         }
-        return HabitStatus(hwl.habit, log, streak, due, weekCount)
+        val strength = Strength.compute(hwl.habit, hwl.logs, date, hwl.shields.map { it.day }.toSet())
+        return HabitStatus(hwl.habit, log, streak, due, weekCount, strength)
     }
+
+    /** Strength of every active habit today – for `strength`, the profile and the review. */
+    suspend fun strengths(date: LocalDate = AppClock.today()): List<Pair<Habit, Strength.Result>> =
+        habitDao.getActiveWithLogs().map { it.habit to Strength.compute(it.habit, it.logs, date, it.shields.map { s -> s.day }.toSet()) }
 
     suspend fun streakFor(habitId: Long, date: LocalDate = AppClock.today()): StreakInfo? {
         val habit = habitDao.getById(habitId) ?: return null
@@ -186,7 +194,7 @@ class HabitRepository(private val db: AppDatabase) {
         val epoch = date.toEpochDay()
         val existing = logDao.get(habitId, epoch)
         val nowCompleted = !(existing?.completed ?: false)
-        val value = if (nowCompleted) habit.target.coerceAtLeast(1) else 0
+        val value = if (nowCompleted) Targets.target(habit, date) else 0
         // checklist: completing the habit ticks every item, un-completing clears them
         val items = if (habit.type == HabitType.CHECKLIST) (if (nowCompleted) allItemsMask(habit) else 0L) else existing?.items ?: 0L
         logDao.upsert(existing.carry(habitId, epoch, value, nowCompleted, items))
@@ -216,10 +224,19 @@ class HabitRepository(private val db: AppDatabase) {
         val epoch = date.toEpochDay()
         val existing = logDao.get(habitId, epoch)
         val newValue = ((existing?.value ?: 0) + delta).coerceAtLeast(0)
-        val completed = newValue >= habit.target.coerceAtLeast(1)
+        val completed = newValue >= Targets.target(habit, date)
         if (newValue == 0 && !completed && existing.isBare()) logDao.delete(habitId, epoch)
         else logDao.upsert(existing.carry(habitId, epoch, newValue, completed))
-        afterChange(habit, epoch, existing?.completed == true, completed, date)
+        afterChange(habit, epoch, existing?.completed == true, completed, date, wasPartial = existing?.let { Targets.minimumReached(habit, it.value, date) } == true, isPartial = Targets.minimumReached(habit, newValue, date))
+    }
+
+    /** Minimum version: log exactly the minimum (`min read` on the command line / the `[~] min` button). */
+    suspend fun logMinimum(habitId: Long, date: LocalDate = AppClock.today()) {
+        val habit = habitDao.getById(habitId) ?: return
+        if (habit.minTarget <= 0) return
+        val existing = logDao.get(habitId, date.toEpochDay())
+        if ((existing?.value ?: 0) >= habit.minTarget) return
+        setValue(habitId, habit.minTarget, date)
     }
 
     suspend fun setValue(habitId: Long, value: Int, date: LocalDate = AppClock.today()) {
@@ -227,10 +244,10 @@ class HabitRepository(private val db: AppDatabase) {
         val epoch = date.toEpochDay()
         val existing = logDao.get(habitId, epoch)
         val v = value.coerceAtLeast(0)
-        val completed = if (habit.type == HabitType.CHECKBOX) v > 0 else v >= habit.target.coerceAtLeast(1)
+        val completed = if (habit.type == HabitType.CHECKBOX) v > 0 else v >= Targets.target(habit, date)
         val items = if (habit.type == HabitType.CHECKLIST) (if (completed) allItemsMask(habit) else if (v == 0) 0L else existing?.items ?: 0L) else existing?.items ?: 0L
         if (v == 0 && existing.isBare()) logDao.delete(habitId, epoch) else logDao.upsert(existing.carry(habitId, epoch, v, completed, items))
-        afterChange(habit, epoch, existing?.completed == true, completed, date)
+        afterChange(habit, epoch, existing?.completed == true, completed, date, wasPartial = existing?.let { Targets.minimumReached(habit, it.value, date) } == true, isPartial = Targets.minimumReached(habit, v, date))
     }
 
     /** Keeps note / mood when the value changes; a new value always clears a skip. */
@@ -396,8 +413,15 @@ class HabitRepository(private val db: AppDatabase) {
 
     suspend fun deleteSession(session: FocusSession) { sessionDao.delete(session); bump() }
 
-    private suspend fun afterChange(habit: Habit, epoch: Long, wasCompleted: Boolean, isCompleted: Boolean, date: LocalDate) {
+    /**
+     * Called by the app after an anchor habit is completed so a stacked follower can be nudged
+     * ("meditate done → journal?"). Set once by the application; null in tests.
+     */
+    var onAnchorCompleted: (suspend (anchor: Habit, date: LocalDate) -> Unit)? = null
+
+    private suspend fun afterChange(habit: Habit, epoch: Long, wasCompleted: Boolean, isCompleted: Boolean, date: LocalDate, wasPartial: Boolean = false, isPartial: Boolean = false) {
         if (!wasCompleted && isCompleted) {
+            xpDao.deleteFor(habit.id, epoch, Progression.REASON_MINIMUM)
             awardOnce(habit.id, epoch, Progression.REASON_COMPLETE, Progression.XP_COMPLETE)
             val streak = Streaks.compute(habit, logDao.getForHabit(habit.id), shieldDao.getForHabit(habit.id), date)
             if (streak.current > 0 && streak.current % 7 == 0) {
@@ -407,6 +431,9 @@ class HabitRepository(private val db: AppDatabase) {
             xpDao.deleteFor(habit.id, epoch, Progression.REASON_COMPLETE)
             xpDao.deleteFor(habit.id, epoch, Progression.REASON_STREAK)
         }
+        // minimum version: half the XP, kept only while the day is partial (a full completion replaces it)
+        if (!isCompleted && isPartial && !wasPartial) awardOnce(habit.id, epoch, Progression.REASON_MINIMUM, Progression.XP_MINIMUM)
+        else if (!isPartial && wasPartial && !isCompleted) xpDao.deleteFor(habit.id, epoch, Progression.REASON_MINIMUM)
         // Perfect-day bonus (habitId 0 = day-level event)
         val summary = daySummary(date)
         val hasPerfect = xpDao.countFor(0, epoch, Progression.REASON_PERFECT_DAY) > 0
@@ -416,6 +443,44 @@ class HabitRepository(private val db: AppDatabase) {
             xpDao.deleteFor(0, epoch, Progression.REASON_PERFECT_DAY)
         }
         bump()
+        if (!wasCompleted && isCompleted && date == AppClock.today()) onAnchorCompleted?.let { hook -> runCatching { hook(habit, date) } }
+    }
+
+    // ------------------------------------------------------------------ minimum / ramp / stacking
+
+    /** `min read 2` – 0 clears. Checkbox and checklist habits have no minimum. */
+    suspend fun setMinimum(habitId: Long, minimum: Int) {
+        val h = habitDao.getById(habitId) ?: return
+        if (h.type == HabitType.CHECKBOX || h.type == HabitType.CHECKLIST) return
+        habitDao.update(h.copy(minTarget = minimum.coerceIn(0, (h.target - 1).coerceAtLeast(0)))); bump()
+    }
+
+    /** `ramp read 30 8` – grow the target to [to] over [weeks] weeks starting today; weeks = 0 clears. */
+    suspend fun setRamp(habitId: Long, to: Int, weeks: Int, from: LocalDate = AppClock.today()) {
+        val h = habitDao.getById(habitId) ?: return
+        if (h.type == HabitType.CHECKBOX || h.type == HabitType.CHECKLIST) return
+        val cleared = weeks <= 0 || to <= 0 || to == h.target
+        habitDao.update(if (cleared) h.copy(rampTo = 0, rampWeeks = 0, rampStartDay = 0L) else h.copy(rampTo = to, rampWeeks = weeks.coerceIn(1, 52), rampStartDay = from.toEpochDay()))
+        bump()
+    }
+
+    /** `after journal meditate` – journal follows meditate; anchorId 0 clears. Refuses self / cycles. */
+    suspend fun setAnchor(habitId: Long, anchorId: Long, remind: Boolean = true): Boolean {
+        val h = habitDao.getById(habitId) ?: return false
+        if (anchorId == habitId) return false
+        if (anchorId > 0L) {
+            val all = habitDao.getAll().associateBy { it.id }
+            var cur = all[anchorId] ?: return false
+            var hops = 0
+            while (cur.anchorId > 0L && hops++ < 16) { if (cur.anchorId == habitId) return false; cur = all[cur.anchorId] ?: break }
+        }
+        habitDao.update(h.copy(anchorId = anchorId.coerceAtLeast(0L), anchorRemind = remind && anchorId > 0L)); bump()
+        return true
+    }
+
+    suspend fun setArea(habitId: Long, area: String) {
+        val h = habitDao.getById(habitId) ?: return
+        habitDao.update(h.copy(area = area)); bump()
     }
 
     private suspend fun awardOnce(habitId: Long, day: Long, reason: String, amount: Int) {
@@ -436,7 +501,7 @@ class HabitRepository(private val db: AppDatabase) {
         if (existing?.completed == true) return
         val items = if (habit.type == HabitType.CHECKLIST) allItemsMask(habit) else existing?.items ?: 0L
         val note = existing?.note?.takeIf { it.isNotBlank() } ?: "logged late"
-        logDao.upsert(existing.carry(habitId, epoch, habit.target.coerceAtLeast(1), true, items).copy(note = note))
+        logDao.upsert(existing.carry(habitId, epoch, Targets.target(habit, day), true, items).copy(note = note))
         afterChange(habit, epoch, existing?.completed == true, true, day)
     }
 
@@ -497,15 +562,15 @@ class HabitRepository(private val db: AppDatabase) {
         val evening = routineDao.insert(Routine(name = "evening", icon = "☾", position = 2))
         habitDao.insertAll(
             listOf(
-                Habit(name = "meditate", type = HabitType.TIMER, target = 10, unit = "min", routineId = morning, color = "purple", position = 0),
-                Habit(name = "drink water", type = HabitType.COUNTER, target = 8, unit = "cups", routineId = morning, color = "cyan", position = 1),
-                Habit(name = "stretch", type = HabitType.CHECKBOX, routineId = morning, color = "green", position = 2),
-                Habit(name = "focus session", type = HabitType.TIMER, target = 50, unit = "min", routineId = focus, color = "orange", position = 3),
+                Habit(name = "meditate", type = HabitType.TIMER, target = 10, unit = "min", routineId = morning, color = "purple", position = 0, area = "mind", minTarget = 2),
+                Habit(name = "drink water", type = HabitType.COUNTER, target = 8, unit = "cups", routineId = morning, color = "cyan", position = 1, area = "body"),
+                Habit(name = "stretch", type = HabitType.CHECKBOX, routineId = morning, color = "green", position = 2, area = "body"),
+                Habit(name = "focus session", type = HabitType.TIMER, target = 50, unit = "min", routineId = focus, color = "orange", position = 3, area = "work", minTarget = 25),
                 Habit(name = "commit code", type = HabitType.CHECKBOX, routineId = focus, color = "green", position = 4,
-                    schedule = ScheduleType.SPECIFIC_DAYS, daysMask = 31),
-                Habit(name = "read", type = HabitType.COUNTER, target = 20, unit = "pages", routineId = evening, color = "yellow", position = 5),
+                    schedule = ScheduleType.SPECIFIC_DAYS, daysMask = 31, area = "work"),
+                Habit(name = "read", type = HabitType.COUNTER, target = 20, unit = "pages", routineId = evening, color = "yellow", position = 5, area = "mind", minTarget = 2),
                 Habit(name = "workout", type = HabitType.CHECKBOX, routineId = null, color = "red", position = 6,
-                    schedule = ScheduleType.WEEKLY, timesPerWeek = 3),
+                    schedule = ScheduleType.WEEKLY, timesPerWeek = 3, area = "body"),
             ),
         )
         bump()

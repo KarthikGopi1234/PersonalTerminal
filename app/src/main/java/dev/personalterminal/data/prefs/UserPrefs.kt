@@ -74,6 +74,8 @@ data class Settings(
     val compactLiveUpdate: Boolean = true,
     /** Today grouped by time of day (morning / afternoon / evening / anytime) instead of by routine. */
     val todaySections: Boolean = false,
+    /** "" = routine order · "strength" = weakest habits first inside each block. */
+    val todaySort: String = "",
 ) {
     val prompt: String get() = "$username@$hostname"
     val hasQuietHours: Boolean get() = quietStartMin != quietEndMin
@@ -116,9 +118,16 @@ data class NotificationPrefs(
     /** One glanceable morning line (opt-in): habits today, watch suggestion, sleep, streaks at risk. */
     val morningBriefing: Boolean = false,
     val morningBriefingMinutes: Int = 7 * 60 + 30,
+    /** Evening summary (opt-in): one `4/6 done · open: …` line at [eveningSummaryMinutes]; replaces per-habit check-ins when on. */
+    val eveningSummary: Boolean = false,
+    val eveningSummaryMinutes: Int = 21 * 60 + 30,
+    /** Comeback nudge: one line after [dev.personalterminal.domain.Comeback.QUIET_DAYS] days without a log, with back-off. */
+    val comebackNudge: Boolean = true,
+    /** Stacked habits: nudge the follower the moment its anchor is ticked (`after` habits with anchorRemind). */
+    val stackNudge: Boolean = true,
 ) {
     /** True when at least one *scheduled* (time-based) notification is on – used to arm the scheduler. */
-    val anyScheduled: Boolean get() = habitReminders || habitCheckIn || wearLog || streakRisk || weeklyReview || morningBriefing
+    val anyScheduled: Boolean get() = habitReminders || habitCheckIn || wearLog || streakRisk || weeklyReview || morningBriefing || eveningSummary
 }
 
 class UserPrefs(private val context: Context) {
@@ -171,6 +180,11 @@ class UserPrefs(private val context: Context) {
         val N_REVIEW_MIN = intPreferencesKey("n_weekly_review_min")
         val N_BRIEFING = booleanPreferencesKey("n_morning_briefing")
         val N_BRIEFING_MIN = intPreferencesKey("n_morning_briefing_min")
+        val N_SUMMARY = booleanPreferencesKey("n_evening_summary")
+        val N_SUMMARY_MIN = intPreferencesKey("n_evening_summary_min")
+        val N_COMEBACK = booleanPreferencesKey("n_comeback")
+        val N_STACK = booleanPreferencesKey("n_stack")
+        val TODAY_SORT = stringPreferencesKey("today_sort")
         val COMPACT_LIVE = booleanPreferencesKey("compact_live_update")
         val TODAY_SECTIONS = booleanPreferencesKey("today_sections")
     }
@@ -226,9 +240,14 @@ class UserPrefs(private val context: Context) {
                 weeklyReviewMinutes = p[Keys.N_REVIEW_MIN] ?: (18 * 60),
                 morningBriefing = p[Keys.N_BRIEFING] ?: false,
                 morningBriefingMinutes = p[Keys.N_BRIEFING_MIN] ?: (7 * 60 + 30),
+                eveningSummary = p[Keys.N_SUMMARY] ?: false,
+                eveningSummaryMinutes = p[Keys.N_SUMMARY_MIN] ?: (21 * 60 + 30),
+                comebackNudge = p[Keys.N_COMEBACK] ?: true,
+                stackNudge = p[Keys.N_STACK] ?: true,
             ),
             compactLiveUpdate = p[Keys.COMPACT_LIVE] ?: true,
             todaySections = p[Keys.TODAY_SECTIONS] ?: false,
+            todaySort = p[Keys.TODAY_SORT] ?: "",
         )
     }
 
@@ -292,5 +311,10 @@ class UserPrefs(private val context: Context) {
         it[Keys.N_STREAK] = n.streakRisk; it[Keys.N_STREAK_MIN] = n.streakRiskMinutes; it[Keys.N_STREAK_LEN] = n.streakRiskMinStreak
         it[Keys.N_REVIEW] = n.weeklyReview; it[Keys.N_REVIEW_MIN] = n.weeklyReviewMinutes
         it[Keys.N_BRIEFING] = n.morningBriefing; it[Keys.N_BRIEFING_MIN] = n.morningBriefingMinutes
+        it[Keys.N_SUMMARY] = n.eveningSummary; it[Keys.N_SUMMARY_MIN] = n.eveningSummaryMinutes
+        it[Keys.N_COMEBACK] = n.comebackNudge; it[Keys.N_STACK] = n.stackNudge
     }
+
+    /** Today ordering: "" (routine order) or "strength" (weakest first inside each block). */
+    suspend fun setTodaySort(v: String) = context.dataStore.edit { it[Keys.TODAY_SORT] = v }
 }

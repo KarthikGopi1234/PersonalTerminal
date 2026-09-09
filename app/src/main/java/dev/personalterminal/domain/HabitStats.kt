@@ -30,6 +30,10 @@ object HabitStats {
         val firstLog: LocalDate?,
         val skipped: Int,
         val notes: Int,
+        /** Habit strength today (0..100) with trend. */
+        val strength: Strength.Result = Strength.Result(0, 0, emptyList()),
+        /** Days (last 30) where only the minimum version was reached. */
+        val minimumDays: Int = 0,
     )
 
     fun report(habit: Habit, logs: List<HabitLog>, shields: List<ShieldUse>, today: LocalDate, hourNow: Int = 12): Report {
@@ -43,7 +47,7 @@ object HabitStats {
                     if (l?.completed == true && !l.skipped) done++
                 } else {
                     if (!Schedule.isDue(habit, d) || l?.skipped == true) continue
-                    val isDone = if (habit.negative) l == null || (l.completed && !l.skipped) || !(l.value > 0 && !l.completed) else l?.completed == true
+                    val isDone = if (habit.negative) l == null || (l.completed && !l.skipped) || !(l.value > 0 && !l.completed) else l?.completed == true || (l != null && Targets.minimumReached(habit, l.value, d))
                     if (habit.negative && d == today && l == null) continue // today's avoid-day is still open
                     scheduled++; if (isDone) done++
                 }
@@ -63,6 +67,8 @@ object HabitStats {
             firstLog = logs.minOfOrNull { it.day }?.let { LocalDate.ofEpochDay(it) },
             skipped = logs.count { it.skipped },
             notes = logs.count { it.note.isNotBlank() },
+            strength = Strength.compute(habit, logs, today, shields.map { it.day }.toSet()),
+            minimumDays = logs.count { !it.skipped && !it.completed && it.day > today.toEpochDay() - 30 && Targets.minimumReached(habit, it.value, LocalDate.ofEpochDay(it.day)) },
         )
     }
 
@@ -71,11 +77,12 @@ object HabitStats {
         fun bar(f: Float, width: Int = 10): String { val n = (f.coerceIn(0f, 1f) * width).roundToInt(); return "█".repeat(n) + "░".repeat(width - n) }
         val h = r.habit
         val sb = StringBuilder()
-        sb.appendLine("${h.name} · ${Schedule.describe(h)}" + (if (h.negative) " · avoid" else "") + (if (h.type != HabitType.CHECKBOX) " · target ${h.target} ${h.unit}".trimEnd() else ""))
+        sb.appendLine("${h.name} · ${Schedule.describe(h)}" + (if (h.negative) " · avoid" else "") + (if (h.type != HabitType.CHECKBOX) " · target ${h.target} ${h.unit}".trimEnd() else "") + (if (h.minTarget > 0) " · min ${h.minTarget}" else ""))
         r.windows.forEach { w ->
             sb.appendLine("%4dd %s %3d%%  %d/%d".format(w.days, bar(w.rate), (w.rate * 100).roundToInt(), w.done, w.scheduled))
         }
-        sb.appendLine("streak ⚡${r.streak.current} · best ${r.streak.best}" + (if (r.streak.shieldedDays > 0) " · ⛨${r.streak.shieldedDays}" else ""))
+        sb.appendLine("streak ⚡${r.streak.current} · best ${r.streak.best}" + (if (r.streak.shieldedDays > 0) " · ⛨${r.streak.shieldedDays}" else "") + " · strength ${Strength.label(r.strength)}")
+        if (r.minimumDays > 0) sb.appendLine("[~] min days (30d) ${r.minimumDays}")
         r.bestWeekday?.let { (dow, rate) -> sb.appendLine("best day ${dow.getDisplayName(TextStyle.SHORT, Locale.US).lowercase()} (${(rate * 100).roundToInt()}%)") }
         when {
             h.type == HabitType.CHECKBOX -> sb.appendLine("done ${r.totalValue}×" + (r.firstLog?.let { " since $it" } ?: ""))

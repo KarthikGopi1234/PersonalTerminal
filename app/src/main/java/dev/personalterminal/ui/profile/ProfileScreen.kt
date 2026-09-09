@@ -3,6 +3,8 @@ package dev.personalterminal.ui.profile
 import dev.personalterminal.domain.AppClock
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -30,6 +32,7 @@ import androidx.navigation.NavHostController
 import dev.personalterminal.PersonalTerminalApp
 import dev.personalterminal.data.prefs.Settings
 import dev.personalterminal.domain.Progression
+import dev.personalterminal.domain.Strength
 import dev.personalterminal.ui.components.AsciiProgress
 import dev.personalterminal.ui.components.Comment
 import dev.personalterminal.ui.components.ContributionHeatmap
@@ -89,6 +92,25 @@ fun ProfileScreen(app: PersonalTerminalApp, nav: NavHostController) {
             longestCurrent?.takeIf { it.streak.current > 0 }?.let { KeyValue("longest current", "${it.habit.name} ⚡${it.streak.current}", valueColor = p.orange) }
         }
 
+        val strengths = s?.all?.filter { !it.habit.archived }?.mapNotNull { hs -> hs.strength?.let { hs to it } }.orEmpty()
+        if (strengths.isNotEmpty()) TerminalPanel(title = "strength", titleColor = p.green, onClick = { nav.navigate(Routes.REVIEW) }) {
+            val avg = strengths.map { it.second.score }.average().toInt()
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("$avg%", color = if (avg >= 70) p.green else if (avg >= Strength.SLIPPING) p.yellow else p.red, style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.width(8.dp))
+                Text("average across ${strengths.size} habit${if (strengths.size == 1) "" else "s"}", color = p.fgDim, style = MaterialTheme.typography.bodySmall)
+            }
+            Spacer(Modifier.height(4.dp))
+            strengths.sortedBy { it.second.score }.take(6).forEach { (hs, st) ->
+                Row(Modifier.fillMaxWidth().clickable { nav.navigate(Routes.habitDetail(hs.habit.id)) }.padding(vertical = 1.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text(hs.habit.name, color = p.named(hs.habit.color), style = MaterialTheme.typography.bodySmall, maxLines = 1, modifier = Modifier.weight(1f))
+                    Text(Strength.sparkline(st.history), color = if (st.slipping) p.red else p.fgDim, style = MaterialTheme.typography.bodySmall)
+                    Text(" %3d%% %s".format(st.score, st.arrow), color = if (st.slipping) p.red else p.fg, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Comment("a forgiving score: one miss costs ~7 pts, one day back earns ~7 · `strength` in the prompt")
+        }
+
         TerminalPanel(title = "shields", titleColor = p.cyan) {
             Text("⛨ ${s?.shieldsAvailable ?: 0} available", color = p.cyan, style = MaterialTheme.typography.titleMedium)
             Comment("earn 1 shield every ${Progression.SHIELD_EVERY} completions (max ${Progression.MAX_SHIELDS} held)")
@@ -111,7 +133,7 @@ fun ProfileScreen(app: PersonalTerminalApp, nav: NavHostController) {
                 }
             }
             Spacer(Modifier.height(4.dp))
-            Comment("+${Progression.XP_COMPLETE} per habit · +${Progression.XP_STREAK_WEEK} each 7-day streak · +${Progression.XP_PERFECT_DAY} perfect day")
+            Comment("+${Progression.XP_COMPLETE} per habit · +${Progression.XP_MINIMUM} minimum version · +${Progression.XP_STREAK_WEEK} each 7-day streak · +${Progression.XP_PERFECT_DAY} perfect day")
         }
 
         val focusTotal by remember { app.habits.observeTotalFocusMinutes() }.collectAsStateWithLifecycle(initialValue = 0)

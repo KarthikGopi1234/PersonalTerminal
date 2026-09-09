@@ -22,6 +22,11 @@ pause <habit> [until yyyy-mm-dd | 2w | 10d | 1m]      hide a habit until a date 
 pause                     list paused habits           resume <habit>       bring it back early
 sleep 23:30 · wake 06:45  sleep anchors for the night  slept 23:30 06:45    both at once · `sleep` shows stats
 stats [habit]             30/90/365-day block (bare `stats` = one line per habit)
+strength [habit]          habit strength, weakest first (sparkline + trend) · `sort strength|routine` orders Today
+min <habit> <n>           minimum version: n keeps the streak as `[~] min` · `min <habit>` logs it · `min <habit> 0` clears
+ramp <habit> <to> <weeks> grow the target one step a week (`ramp read 30 8`) · `ramp <habit> off` · bare shows
+after <habit> <anchor>    habit stacking: <habit> follows <anchor> (greyed until it is ticked, nudged then) · `after <habit> none`
+area <habit> <area>       life area body|mind|work|people|home|money · bare `area` draws the balance radar
 strap <strap> <watch>     fit a strap (logged as a swap) strap <strap> drawer take it off · strap <strap> where is it
 remind <habit> 07:30      set / `off` the reminder     remind <habit> checkin on|off   evening check-in
 remind                    list reminders

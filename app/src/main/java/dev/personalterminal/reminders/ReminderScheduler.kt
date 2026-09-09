@@ -22,6 +22,8 @@ import dev.personalterminal.data.db.displayName
 import dev.personalterminal.data.prefs.NotificationPrefs
 import dev.personalterminal.data.prefs.Settings
 import dev.personalterminal.domain.AppClock
+import dev.personalterminal.domain.Comeback
+import dev.personalterminal.domain.Stacks
 import dev.personalterminal.domain.HabitStatus
 import dev.personalterminal.domain.Schedule
 import dev.personalterminal.data.db.ScheduleType
@@ -53,7 +55,7 @@ object ReminderScheduler {
     private const val GROUP = "habit-reminders"
 
     /** Kinds of scheduled notification; also the tag in the notification id space. */
-    enum class Kind { HABIT, CHECK_IN, WEAR, STREAK, REVIEW, BRIEFING }
+    enum class Kind { HABIT, CHECK_IN, WEAR, STREAK, REVIEW, BRIEFING, SUMMARY }
 
     data class Slot(val at: LocalDateTime, val kind: Kind)
 
@@ -89,7 +91,8 @@ object ReminderScheduler {
             }
         }
         if (n.habitReminders) habits.filter { it.reminderMinutes >= 0 }.forEach { h -> daily(h.reminderMinutes, Kind.HABIT) { Schedule.isDue(h, it) } }
-        if (n.habitCheckIn && habits.any { it.checkIn }) daily(n.checkInMinutes, Kind.CHECK_IN) { d -> habits.any { it.checkIn && Schedule.isDue(it, d) } }
+        if (n.habitCheckIn && !n.eveningSummary && habits.any { it.checkIn }) daily(n.checkInMinutes, Kind.CHECK_IN) { d -> habits.any { it.checkIn && Schedule.isDue(it, d) } }
+        if (n.eveningSummary && habits.isNotEmpty()) daily(n.eveningSummaryMinutes, Kind.SUMMARY)
         if (n.wearLog && hasWatches) daily(n.wearLogMinutes, Kind.WEAR)
         if (n.streakRisk && habits.isNotEmpty()) daily(n.streakRiskMinutes, Kind.STREAK)
         if (n.weeklyReview && habits.isNotEmpty()) daily(n.weeklyReviewMinutes, Kind.REVIEW) { it.dayOfWeek == DayOfWeek.SUNDAY }
@@ -109,6 +112,7 @@ object ReminderScheduler {
         val label = when (slot.kind) {
             Kind.HABIT -> "habit reminder"; Kind.CHECK_IN -> "check-in"; Kind.WEAR -> "wear log"
             Kind.STREAK -> "streak check"; Kind.REVIEW -> "weekly review"; Kind.BRIEFING -> "morning briefing"
+            Kind.SUMMARY -> "evening summary"
         }
         val day = when (slot.at.toLocalDate()) {
             now.toLocalDate() -> "today"; now.toLocalDate().plusDays(1) -> "tomorrow"
@@ -136,8 +140,8 @@ object ReminderScheduler {
             h.reminderMinutes >= 0 && hs.isDueToday && !hs.completed && !hs.skipped && within(h.reminderMinutes)
         }.forEach { hs -> postIfAllowed(context, habitNotification(context, hs, checkIn = false)) }
 
-        // 2. evening check-in for flagged habits that are still unlogged
-        if (n.habitCheckIn && within(n.checkInMinutes)) summary.all.filter { hs ->
+        // 2. evening check-in for flagged habits that are still unlogged (replaced by the summary when that is on)
+        if (n.habitCheckIn && !n.eveningSummary && within(n.checkInMinutes)) summary.all.filter { hs ->
             hs.habit.checkIn && hs.isDueToday && !hs.completed && !hs.skipped && (!hs.habit.negative || !hs.slipped)
         }.forEach { hs -> postIfAllowed(context, habitNotification(context, hs, checkIn = true)) }
 
@@ -174,6 +178,44 @@ object ReminderScheduler {
             val text = runCatching { Briefing.build(app, summary, today) }.getOrNull()
             if (text != null) postIfAllowed(context, briefingNotification(context, text))
         }
+
+        // 7. evening summary – one line instead of N check-ins
+        if (n.eveningSummary && within(n.eveningSummaryMinutes) && summary.active.isNotEmpty()) {
+            postIfAllowed(context, summaryNotification(context, summary))
+        }
+    }
+
+    private fun summaryNotification(context: Context, summary: dev.personalterminal.domain.DaySummary): Pair<Int, android.app.Notification> {
+        val open = summary.active.filter { !it.completed && !it.skipped }.map { it.habit.name }
+        val atRisk = summary.active.filter { !it.completed && !it.skipped && it.streak.current >= 3 }.sortedByDescending { it.streak.current }.map { "${it.habit.name} ⚡${it.streak.current}" }
+        val text = Comeback.summary(summary.done, summary.active.size, open, atRisk)
+        val lines = summary.active.joinToString("\n") { hs -> (if (hs.completed) "[✓] " else if (hs.partial) "[~] " else "[ ] ") + hs.habit.name }
+        val b = NotificationCompat.Builder(context, PersonalTerminalApp.CHANNEL_REMINDERS)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(text.title)
+            .setContentText(text.line)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(lines))
+            .setContentIntent(activity(context, NOTIF_SUMMARY, Routes.TODAY))
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+        return NOTIF_SUMMARY to b.build()
+    }
+
+    /**
+     * Habit stacking: [anchor] was just completed → post the reminder for every follower that opted
+     * in (`after <anchor>` + remind-on-anchor). Respects the master switch and quiet hours.
+     */
+    suspend fun onAnchorCompleted(context: Context, anchor: Habit, date: LocalDate) {
+        val app = PersonalTerminalApp.get(context)
+        val settings = app.prefs.current()
+        if (!settings.remindersEnabled || !settings.notifications.stackNudge || !hasNotificationAccess(context)) return
+        val now = AppClock.now()
+        if (settings.isQuiet(now.hour * 60 + now.minute)) return
+        val summary = app.habits.daySummary(date)
+        Stacks.toNudge(anchor.id, summary.all).forEach { hs ->
+            postIfAllowed(context, habitNotification(context, hs, checkIn = false, after = anchor.name))
+        }
     }
 
     /** Posts if (and only if) POST_NOTIFICATIONS is granted; a revoked permission is never fatal here. */
@@ -185,7 +227,7 @@ object ReminderScheduler {
         try { NotificationManagerCompat.from(context).notify(pair.first, pair.second) } catch (_: SecurityException) { }
     }
 
-    private fun habitNotification(context: Context, hs: HabitStatus, checkIn: Boolean): Pair<Int, android.app.Notification> {
+    private fun habitNotification(context: Context, hs: HabitStatus, checkIn: Boolean, after: String? = null): Pair<Int, android.app.Notification> {
         val h = hs.habit
         val open = activity(context, h.id.toInt(), Routes.habitDetail(h.id))
         val done = PendingIntent.getBroadcast(
@@ -205,14 +247,17 @@ object ReminderScheduler {
             text = when {
                 h.negative -> "still clean? tap done to confirm, or log a slip in the app"
                 h.type == HabitType.CHECKBOX -> "not logged yet · tap done or skip"
-                else -> "${hs.value}/${h.target} ${h.unit} logged so far".trim()
+                else -> "${hs.value}/${hs.target} ${h.unit} logged so far".trim()
             }
+        } else if (after != null) {
+            title = "[✓] $after → [ ] ${h.name}"
+            text = if (h.type == HabitType.CHECKBOX) "next in the stack · tap done when finished" else "next in the stack · ${hs.value}/${hs.target} ${h.unit} so far".trim()
         } else {
             title = "[ ] ${h.name}"
             text = when {
                 h.negative -> "still clean today? keep it that way"
                 h.type == HabitType.CHECKBOX -> "time to ${h.name}"
-                else -> "${hs.value}/${h.target} ${h.unit} so far".trim()
+                else -> "${hs.value}/${hs.target} ${h.unit} so far".trim()
             }
         }
         val b = NotificationCompat.Builder(context, PersonalTerminalApp.CHANNEL_REMINDERS)
@@ -339,6 +384,7 @@ object ReminderScheduler {
         if (n.wearLog) { val sug = runCatching { app.watches.suggestNext(today) }.getOrNull(); postIfAllowed(context, wearNotification(context, today, sug?.first?.id, sug?.let { "${it.first.displayName} · ${it.second}" })); sent++ }
         if (n.streakRisk) { val name = summary.all.firstOrNull()?.habit?.name ?: "stretch"; postIfAllowed(context, streakNotification(context, listOf(name to n.streakRiskMinStreak), summary.shieldsAvailable)); sent++ }
         if (n.weeklyReview) { postIfAllowed(context, reviewNotification(context, summary.done, summary.active.size)); sent++ }
+        if (n.eveningSummary && summary.active.isNotEmpty()) { postIfAllowed(context, summaryNotification(context, summary)); sent++ }
         return if (sent == 0) "nothing enabled to test" else "sent $sent test notification${if (sent > 1) "s" else ""}"
     }
 
@@ -348,6 +394,7 @@ object ReminderScheduler {
     private const val NOTIF_STREAK = 6901
     private const val NOTIF_REVIEW = 6902
     private const val NOTIF_BRIEFING = 6903
+    private const val NOTIF_SUMMARY = 6904
 }
 
 class ReminderWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {

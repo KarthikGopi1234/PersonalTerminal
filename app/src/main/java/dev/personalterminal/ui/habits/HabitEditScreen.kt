@@ -42,6 +42,7 @@ import dev.personalterminal.data.db.HabitType
 import dev.personalterminal.data.db.TimeOfDay
 import dev.personalterminal.data.db.checklistItems
 import dev.personalterminal.data.db.ScheduleType
+import dev.personalterminal.domain.AppClock
 import dev.personalterminal.domain.Schedule
 import dev.personalterminal.ui.components.Comment
 import dev.personalterminal.ui.components.PromptLine
@@ -84,6 +85,14 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
     var focusMin by remember { mutableIntStateOf(0) }
     var breakMin by remember { mutableIntStateOf(0) }
     var healthMetric by remember { mutableStateOf("") }
+    var minTarget by remember { mutableIntStateOf(0) }
+    var rampTo by remember { mutableIntStateOf(0) }
+    var rampWeeks by remember { mutableIntStateOf(0) }
+    var rampStartDay by remember { mutableStateOf(0L) }
+    var anchorId by remember { mutableStateOf(0L) }
+    var anchorRemind by remember { mutableStateOf(true) }
+    var area by remember { mutableStateOf("") }
+    val allHabits by remember { app.habits.observeActiveHabits() }.collectAsStateWithLifecycle(initialValue = emptyList())
     val settings by app.prefs.settings.collectAsStateWithLifecycle(initialValue = dev.personalterminal.data.prefs.Settings())
 
     LaunchedEffect(habitId) {
@@ -91,6 +100,7 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
             original = h; name = h.name; type = h.type; target = h.target; unit = h.unit; schedule = h.schedule
             daysMask = h.daysMask; timesPerWeek = h.timesPerWeek; selectedRoutine = h.routineId; color = h.color; notes = h.notes
             negative = h.negative; reminder = h.reminderMinutes; checkIn = h.checkIn; items = h.checklistItems; timeOfDay = h.timeOfDay; focusMin = h.focusMinutes; breakMin = h.breakMinutes; healthMetric = h.healthMetric
+            minTarget = h.minTarget; rampTo = h.rampTo; rampWeeks = h.rampWeeks; rampStartDay = h.rampStartDay; anchorId = h.anchorId; anchorRemind = h.anchorRemind || h.anchorId == 0L; area = h.area
         }
         loaded = true
     }
@@ -166,6 +176,59 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
                 }
                 TermTextField(value = unit, onValueChange = { unit = it.take(10) }, label = "unit", placeholder = if (type == HabitType.TIMER) "min" else "cups", modifier = Modifier.weight(1f))
             }
+            // minimum version: the two-minute rule as a field
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+                Column {
+                    Text("minimum:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+                    Stepper(value = minTarget, onChange = { minTarget = it }, min = 0, max = (target - 1).coerceAtLeast(0), color = p.yellow)
+                }
+                Spacer(Modifier.width(12.dp))
+                Comment(if (minTarget > 0) "$minTarget ${unit.ifBlank { "" }} keeps the streak on a thin day → logged as [~] min, half the xp".trim() else "0 = off · a floor that still counts (e.g. 2 pages of 20)", modifier = Modifier.weight(1f))
+            }
+            // ramp: grow the target without weekly edits
+            Column(Modifier.padding(top = 6.dp)) {
+                Text("ramp:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 4.dp)) {
+                    Chip(label = "off", selected = rampWeeks == 0, color = p.fgDim) { rampTo = 0; rampWeeks = 0; rampStartDay = 0L }
+                    listOf(4, 8, 12).forEach { w -> Chip(label = "$w weeks", selected = rampWeeks == w, color = p.purple) { rampWeeks = w; if (rampTo <= 0) rampTo = target * 2; if (rampStartDay == 0L) rampStartDay = AppClock.today().toEpochDay() } }
+                }
+                if (rampWeeks > 0) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                    Text("to ", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+                    Stepper(value = rampTo, onChange = { rampTo = it }, min = 1, max = 10_000, color = p.purple)
+                    Spacer(Modifier.width(8.dp))
+                    Text("over ", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+                    Stepper(value = rampWeeks, onChange = { rampWeeks = it }, min = 1, max = 52, suffix = "w", color = p.purple)
+                }
+                Comment(
+                    if (rampWeeks > 0 && rampTo != target) "$target → $rampTo ${unit.trim()} in $rampWeeks weekly steps from ${java.time.LocalDate.ofEpochDay(if (rampStartDay > 0) rampStartDay else AppClock.today().toEpochDay())} · each day is judged against that day's target".trim()
+                    else "target grows one step a week – the streak keeps counting against the day's target",
+                )
+            }
+        }
+
+        Column {
+            Text("stack after:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 4.dp)) {
+                Chip(label = "nothing", selected = anchorId == 0L, color = p.fgDim) { anchorId = 0L }
+                allHabits.filter { it.id != habitId && it.anchorId != habitId }.forEach { a -> Chip(label = a.name, selected = anchorId == a.id, color = p.cyan) { anchorId = a.id } }
+            }
+            if (anchorId != 0L) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { anchorRemind = !anchorRemind }.padding(top = 6.dp, bottom = 2.dp)) {
+                    Text(if (anchorRemind) "[✓]" else "[ ]", color = if (anchorRemind) p.cyan else p.fgDim, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(8.dp))
+                    Text("nudge me the moment ${allHabits.firstOrNull { it.id == anchorId }?.name ?: "the anchor"} is ticked", color = p.fg, style = MaterialTheme.typography.bodyMedium)
+                }
+                Comment("habit stacking: shown as a chain on today, greyed until the anchor is done")
+            } else Comment("`after X` – anchor this habit to one you already do (habit stacking)")
+        }
+
+        Column {
+            Text("life area:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 4.dp)) {
+                Chip(label = "none", selected = area.isBlank(), color = p.fgDim) { area = "" }
+                dev.personalterminal.domain.Areas.all.forEach { a -> Chip(label = "${a.glyph} ${a.label}", selected = area == a.id, color = p.green) { area = a.id } }
+            }
+            Comment("feeds the balance radar in the weekly review")
         }
 
         Column {
@@ -320,6 +383,12 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
                             healthMetric = if (type == HabitType.COUNTER || type == HabitType.TIMER) healthMetric else "",
                             checklist = if (type == HabitType.CHECKLIST) cleanItems.joinToString("\n") else "",
                             timeOfDay = timeOfDay,
+                            minTarget = if (type == HabitType.COUNTER || type == HabitType.TIMER) minTarget.coerceIn(0, (target - 1).coerceAtLeast(0)) else 0,
+                            rampTo = if ((type == HabitType.COUNTER || type == HabitType.TIMER) && rampWeeks > 0 && rampTo != target) rampTo else 0,
+                            rampWeeks = if ((type == HabitType.COUNTER || type == HabitType.TIMER) && rampWeeks > 0 && rampTo != target) rampWeeks else 0,
+                            rampStartDay = if ((type == HabitType.COUNTER || type == HabitType.TIMER) && rampWeeks > 0 && rampTo != target) (if (rampStartDay > 0) rampStartDay else AppClock.today().toEpochDay()) else 0L,
+                            anchorId = anchorId, anchorRemind = anchorId != 0L && anchorRemind,
+                            area = area,
                         )
                         app.habits.saveHabit(h)
                         dev.personalterminal.reminders.ReminderScheduler.reschedule(app)

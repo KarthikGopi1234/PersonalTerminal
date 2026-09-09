@@ -7,6 +7,8 @@ import dev.personalterminal.data.db.Habit
 import dev.personalterminal.data.db.HabitType
 import dev.personalterminal.domain.HabitStats
 import dev.personalterminal.domain.Schedule
+import dev.personalterminal.domain.Strength
+import dev.personalterminal.domain.Targets
 import dev.personalterminal.domain.Sleep
 import dev.personalterminal.data.db.isPausedOn
 import dev.personalterminal.data.db.checklistItems
@@ -66,6 +68,99 @@ object Commands {
                     else -> err("${h.name}: nothing to repair")
                 }
             } ?: noHabit(rest)
+            "strength", "str" -> {
+                // `strength` → every habit weakest first · `strength <habit>` → sparkline + trend
+                val rows = app.habits.strengths(date)
+                if (rest.isBlank()) {
+                    if (rows.isEmpty()) err("no habits yet")
+                    else ok("strength (weakest first)\n" + rows.sortedBy { it.second.score }.joinToString("\n") { (h, r) ->
+                        "%-14s %3d%% %s %s".format(h.name.take(14), r.score, r.arrow, Strength.sparkline(r.history))
+                    } + "\n# ${Strength.SLIPPING}% and below = slipping · one miss costs ~7 pts, one day back earns ~7")
+                } else habit(app, rest)?.let { h ->
+                    val r = rows.firstOrNull { it.first.id == h.id }?.second ?: return err("${h.name} is archived")
+                    ok("${h.name}: ${Strength.label(r)} · week ago ${r.weekAgo}%\n${Strength.sparkline(r.history, 16)} 28 scheduled days" + if (r.slipping) "\n# slipping – a minimum version (`min ${h.name} n`) keeps the chain on thin days" else "")
+                } ?: noHabit(rest)
+            }
+            "min", "minimum" -> {
+                // `min read 2` sets the minimum version · `min read` logs it today · `min read 0` clears
+                val parts = rest.trim().split(Regex("\\s+"))
+                val n = parts.lastOrNull()?.toIntOrNull()
+                val ref = if (n != null) parts.dropLast(1).joinToString(" ") else rest
+                habit(app, ref)?.let { h ->
+                    when {
+                        h.type == HabitType.CHECKBOX || h.type == HabitType.CHECKLIST -> err("${h.name} has no numeric target – minimums are for counters and timers")
+                        n == null && h.minTarget <= 0 -> err("${h.name} has no minimum yet · `min ${h.name} 2` sets one")
+                        n == null -> { app.habits.logMinimum(h.id, date); val st = status(app, h.id, date); ok("[~] ${h.name} ${st?.value ?: h.minTarget}/${st?.target ?: h.target} ${h.unit} · minimum reached, streak safe".trim()) }
+                        n == 0 -> { app.habits.setMinimum(h.id, 0); ok("${h.name}: minimum cleared") }
+                        n >= Targets.target(h, date) -> err("minimum must be below the target (${Targets.target(h, date)})")
+                        else -> { app.habits.setMinimum(h.id, n); ok("${h.name}: minimum $n ${h.unit} · reaching it keeps the streak as [~] min".trim()) }
+                    }
+                } ?: noHabit(ref)
+            }
+            "ramp" -> {
+                // `ramp read 30 8` → target grows 10 → 30 over 8 weeks · `ramp read off` clears · `ramp read` shows
+                val parts = rest.trim().split(Regex("\\s+"))
+                val nums = parts.takeLastWhile { it.toIntOrNull() != null }.map { it.toInt() }
+                val off = parts.lastOrNull()?.lowercase() in setOf("off", "clear", "stop")
+                val ref = parts.dropLast(if (off) 1 else nums.size).joinToString(" ")
+                habit(app, ref)?.let { h ->
+                    when {
+                        h.type == HabitType.CHECKBOX || h.type == HabitType.CHECKLIST -> err("${h.name} has no numeric target to ramp")
+                        off -> { app.habits.setRamp(h.id, 0, 0); ok("${h.name}: ramp cleared · target stays ${h.target}") }
+                        nums.isEmpty() -> ok(Targets.rampLabel(h, date)?.let { "${h.name}: $it · today ${Targets.target(h, date)} ${h.unit}".trim() } ?: "${h.name}: no ramp · `ramp ${h.name} <to> <weeks>`")
+                        nums.size < 2 -> err("usage: ramp <habit> <to> <weeks>  e.g. ramp read 30 8")
+                        nums[0] == h.target -> err("target is already ${h.target}")
+                        else -> { app.habits.setRamp(h.id, nums[0], nums[1], date); ok("${h.name}: ${h.target} → ${nums[0]} over ${nums[1].coerceIn(1, 52)} weeks · first step next week") }
+                    }
+                } ?: noHabit(ref)
+            }
+            "after", "stack" -> {
+                // `after journal meditate` → journal follows meditate · `after journal none` clears · `after journal` shows
+                val parts = rest.trim().split(Regex("\\s+"), limit = 2)
+                habit(app, parts.getOrNull(0) ?: "")?.let { h ->
+                    val anchorRef = parts.getOrNull(1)?.trim() ?: ""
+                    when {
+                        anchorRef.isBlank() -> {
+                            val a = app.habits.allHabits().firstOrNull { it.id == h.anchorId }
+                            ok(if (a == null) "${h.name} follows nothing · `after ${h.name} <anchor>`" else "${a.name} → ${h.name}" + if (h.anchorRemind) " · nudged when ${a.name} is ticked" else "")
+                        }
+                        anchorRef.lowercase() in setOf("none", "off", "clear", "nothing") -> { app.habits.setAnchor(h.id, 0L); ok("${h.name} unstacked") }
+                        else -> habit(app, anchorRef)?.let { a ->
+                            if (a.id == h.id) err("a habit can't follow itself")
+                            else if (app.habits.setAnchor(h.id, a.id)) ok("${a.name} → ${h.name} · ${h.name} waits until ${a.name} is ticked, then nudges you")
+                            else err("that would loop the stack")
+                        } ?: noHabit(anchorRef)
+                    }
+                } ?: noHabit(parts.getOrNull(0) ?: "")
+            }
+            "area" -> {
+                // `area run body` · `area run none` · `area` lists the balance
+                val parts = rest.trim().split(Regex("\\s+"))
+                if (rest.isBlank()) {
+                    val hwl = app.habits.activeWithLogs().map { it.habit to it.logs }
+                    val scores = dev.personalterminal.domain.Areas.balance(hwl, date.minusDays(6), date)
+                    if (scores.isEmpty()) err("no areas yet · `area <habit> body|mind|work|people|home|money`") else ok(dev.personalterminal.domain.Areas.radar(scores) + "\n" + dev.personalterminal.domain.Areas.summary(scores))
+                } else {
+                    val areaId = parts.last().lowercase()
+                    val ref = parts.dropLast(1).joinToString(" ")
+                    val area = dev.personalterminal.domain.Areas.byId(areaId)
+                    habit(app, ref)?.let { h ->
+                        when {
+                            areaId in setOf("none", "off", "clear") -> { app.habits.setArea(h.id, ""); ok("${h.name}: area cleared") }
+                            area == null -> err("areas: " + dev.personalterminal.domain.Areas.all.joinToString(" ") { it.id })
+                            else -> { app.habits.setArea(h.id, area.id); ok("${h.name} → ${area.glyph} ${area.label}") }
+                        }
+                    } ?: noHabit(ref)
+                }
+            }
+            "sort" -> {
+                val mode = rest.trim().lowercase()
+                when (mode) {
+                    "strength", "weakest", "weak" -> { app.prefs.setTodaySort("strength"); ok("today: weakest first") }
+                    "", "routine", "default", "order" -> { app.prefs.setTodaySort(""); ok("today: routine order") }
+                    else -> err("sort strength | sort routine")
+                }
+            }
             "stats", "stat", "show" -> {
                 if (rest.isBlank()) {
                     // no habit → one line per habit, 30-day rate
@@ -133,10 +228,10 @@ object Commands {
                 ok("[ ] ${h.name} reset")
             } ?: noHabit(rest)
             "add", "inc", "+", "plus" -> numberThenHabit(app, rest, 1)?.let { (n, h) ->
-                app.habits.addValue(h.id, n, date); val s = status(app, h.id, date); ok("${h.name} ${s?.value ?: n}/${h.target} ${h.unit}".trim())
+                app.habits.addValue(h.id, n, date); val s = status(app, h.id, date); ok("${h.name} ${s?.value ?: n}/${s?.target ?: h.target} ${h.unit}".trim() + if (s?.partial == true) " · [~] min" else "")
             } ?: err("usage: add <n> <habit>")
             "sub", "-", "minus", "dec" -> numberThenHabit(app, rest, 1)?.let { (n, h) ->
-                app.habits.addValue(h.id, -n, date); val s = status(app, h.id, date); ok("${h.name} ${s?.value ?: 0}/${h.target}")
+                app.habits.addValue(h.id, -n, date); val s = status(app, h.id, date); ok("${h.name} ${s?.value ?: 0}/${s?.target ?: h.target}")
             } ?: err("usage: sub <n> <habit>")
             "set" -> numberThenHabit(app, rest, null)?.let { (n, h) -> app.habits.setValue(h.id, n, date); ok("${h.name} = $n ${h.unit}".trim()) } ?: err("usage: set <n> <habit>")
             "skip" -> habit(app, rest)?.let { h -> app.habits.skip(h.id, comment, date); ok("[»] ${h.name} skipped" + if (comment.isNotBlank()) " ($comment)" else "") } ?: noHabit(rest)
@@ -278,7 +373,7 @@ object Commands {
             }
             "ls", "list" -> {
                 val s = app.habits.daySummary(date)
-                ok(s.due.joinToString("\n") { hs -> (if (hs.completed) "[✓] " else if (hs.skipped) "[»] " else "[ ] ") + hs.habit.name + if (hs.habit.type != HabitType.CHECKBOX) " ${hs.value}/${hs.habit.target}" else "" }.ifBlank { "nothing due today" })
+                ok(s.due.joinToString("\n") { hs -> (if (hs.completed) "[✓] " else if (hs.skipped) "[»] " else if (hs.partial) "[~] " else "[ ] ") + hs.habit.name + if (hs.habit.type != HabitType.CHECKBOX) " ${hs.value}/${hs.target}" else "" }.ifBlank { "nothing due today" })
             }
             "status", "st" -> { val s = app.habits.daySummary(date); ok("${s.done}/${s.active.size} done · ⛨ ${s.shieldsAvailable} · ${s.totalXp} xp") }
             "review", "weekly" -> if (rest.trim().lowercase() in setOf("year", "--year", "annual")) ok("year in review", Routes.YEAR_REVIEW) else ok("weekly review", Routes.REVIEW)
@@ -410,6 +505,9 @@ object Commands {
         |away <why> [3d|dates] back
         |habit add [template]  ls · status
         |stats [habit]         30/90/365d block
+        |strength [habit]      min <habit> [n]
+        |ramp <habit> 30 8     after <habit> <anchor>
+        |area <habit> body     sort strength|routine
         |review [year] · achievements · insights
         |theme <name> · font <name> · icon <name>
     """.trimMargin()

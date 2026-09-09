@@ -241,6 +241,7 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(4.dp))
             ToggleLine("today: group by time of day (morning / afternoon / evening) instead of routine", settings.todaySections) { scope.launch { app.prefs.setTodaySections(it) } }
+            ToggleLine("today: weakest habits first (by strength) inside each block", settings.todaySort == "strength") { scope.launch { app.prefs.setTodaySort(if (it) "strength" else "") } }
             ToggleLine("crt scanlines & glow", settings.crtEffect) { scope.launch { app.prefs.setCrt(it) } }
             ToggleLine("accessibility: bigger targets, higher contrast, no animations", settings.accessibilityMode) { scope.launch { app.prefs.setAccessibilityMode(it) } }
             Spacer(Modifier.height(1.dp).onGloballyPositioned { appearanceEnd = it.positionInRoot().y.toInt() + scrollState.value })
@@ -565,8 +566,12 @@ private fun NotificationsPanel(app: PersonalTerminalApp, settings: dev.personalt
         Spacer(Modifier.height(6.dp))
         Text("# habits", color = p.fgDim, style = MaterialTheme.typography.labelSmall)
         NotifLine("habit reminders", "\"time to do it\" at each habit's own time (habit edit)", n.habitReminders, master) { update { it.copy(habitReminders = !it.habitReminders) } }
-        NotifLine("evening check-in", "\"did you do X today?\" for habits with check-in on · done / skip buttons", n.habitCheckIn, master,
+        NotifLine("evening check-in", if (n.eveningSummary) "replaced by the evening summary while that is on" else "\"did you do X today?\" for habits with check-in on · done / skip buttons", n.habitCheckIn && !n.eveningSummary, master && !n.eveningSummary,
             minutes = n.checkInMinutes, onMinutes = { m -> update { it.copy(checkInMinutes = m) } }) { update { it.copy(habitCheckIn = !it.habitCheckIn) } }
+        NotifLine("evening summary", "one line instead of N check-ins: `4/6 done · open: read, journal · streak at risk: journal`", n.eveningSummary, master,
+            minutes = n.eveningSummaryMinutes, onMinutes = { m -> update { it.copy(eveningSummaryMinutes = m) } }) { update { it.copy(eveningSummary = !it.eveningSummary) } }
+        NotifLine("comeback nudge", "after ${dev.personalterminal.domain.Comeback.QUIET_DAYS} quiet days: what's waiting, shields ready, longest streak still alive · backs off ×2 each time", n.comebackNudge, master) { update { it.copy(comebackNudge = !it.comebackNudge) } }
+        NotifLine("stack nudge", "habit stacking: the follower's reminder fires the moment its anchor is ticked (`after` habits)", n.stackNudge, master) { update { it.copy(stackNudge = !it.stackNudge) } }
         NotifLine("streak at risk", "one notice when a streak ≥ ${n.streakRiskMinStreak} days is still open in the evening", n.streakRisk, master,
             minutes = n.streakRiskMinutes, onMinutes = { m -> update { it.copy(streakRiskMinutes = m) } }) { update { it.copy(streakRisk = !it.streakRisk) } }
         if (n.streakRisk && master) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 28.dp)) {

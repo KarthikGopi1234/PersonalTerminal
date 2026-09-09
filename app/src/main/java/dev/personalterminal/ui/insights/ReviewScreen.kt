@@ -25,6 +25,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +44,8 @@ import androidx.navigation.NavHostController
 import dev.personalterminal.PersonalTerminalApp
 import dev.personalterminal.R
 import dev.personalterminal.domain.Insights
+import dev.personalterminal.domain.Areas
+import dev.personalterminal.domain.Strength
 import dev.personalterminal.domain.Schedule
 import dev.personalterminal.ui.components.AsciiProgress
 import dev.personalterminal.ui.components.Comment
@@ -104,6 +109,34 @@ fun ReviewScreen(app: PersonalTerminalApp, nav: NavHostController) {
             if (r.skipped > 0) KeyValue("skipped", "${r.skipped}")
             r.bestDay?.let { KeyValue("best day", "${it.first.format(DateTimeFormatter.ofPattern("EEE"))} (${it.second} done)") }
             r.moodAvg?.let { KeyValue("avg mood", "%.1f / 5".format(it), valueColor = p.yellow) }
+            r.strengthAvg?.let { KeyValue("strength avg", "$it%" + (if (r.minimumDays > 0) " · [~] min ×${r.minimumDays}" else ""), valueColor = if (it >= 70) p.green else if (it >= Strength.SLIPPING) p.yellow else p.red) }
+        }
+
+        if (r.areas.isNotEmpty()) TerminalPanel(title = "balance", titleColor = p.purple) {
+            // filled cells in green, empty / missing in dim, the hub in purple – the share card stays plain text
+            val radar = remember(r) { Areas.radar(r.areas) }
+            Text(
+                buildAnnotatedString {
+                    radar.forEach { ch ->
+                        when (ch) {
+                            '█' -> withStyle(SpanStyle(color = p.green)) { append(ch) }
+                            '░', '·' -> withStyle(SpanStyle(color = p.fgDim)) { append(ch) }
+                            '◆' -> withStyle(SpanStyle(color = p.purple)) { append(ch) }
+                            else -> append(ch)
+                        }
+                    }
+                },
+                color = p.fg, style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(Modifier.height(6.dp))
+            r.areas.sortedBy { it.rate }.forEach { sc ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 1.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text("${sc.area.glyph} ${sc.area.label}", color = p.fg, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    AsciiProgress(fraction = sc.rate, width = 10, color = if (sc.rate < 0.4f) p.red else p.green)
+                    Text("  ${sc.done}/${sc.scheduled}", color = p.fgDim, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Comment("life areas from habit edit · `area <habit> body|mind|work|people|home|money`")
         }
 
         TerminalPanel(title = "per habit") {
@@ -113,10 +146,13 @@ fun ReviewScreen(app: PersonalTerminalApp, nav: NavHostController) {
                     AsciiProgress(fraction = hw.rate, width = 10, color = p.named(hw.habit.color))
                     Text("  ${hw.done}/${hw.scheduled}", color = p.fg, style = MaterialTheme.typography.bodyMedium)
                     Text("  " + (if (hw.delta >= 0) "+" else "") + "${hw.delta}%", color = if (hw.delta >= 0) p.green else p.red, style = MaterialTheme.typography.bodySmall)
+                    hw.strength?.let { st -> Text("  ${st.score}%${st.arrow.takeIf { a -> a != "=" } ?: ""}", color = if (st.slipping) p.red else p.fgDim, style = MaterialTheme.typography.bodySmall) }
                 }
             }
+            Comment("rate · vs last week · strength")
             r.mvp?.let { Spacer(Modifier.height(6.dp)); Text("mvp: ${it.habit.name}" + if (it.streak > 0) " ⚡${it.streak}" else "", color = p.yellow, style = MaterialTheme.typography.bodyMedium) }
             r.needsLove?.let { Text("needs love: ${it.habit.name} (${(it.rate * 100).toInt()}%)", color = p.red, style = MaterialTheme.typography.bodyMedium) }
+            r.weakest?.let { if (it != r.needsLove) Text("slipping: ${it.habit.name} · strength ${it.strength!!.score}% ${it.strength.arrow}", color = p.red, style = MaterialTheme.typography.bodyMedium) }
         }
 
         TerminalPanel(title = "share card", titleColor = p.cyan) {
@@ -168,7 +204,8 @@ internal fun renderCard(ctx: Context, card: String, p: TerminalPalette): File {
             i == 1 -> p.green.toArgb()
             line.contains("█") -> p.cyan.toArgb()
             line.contains("mvp:") -> p.yellow.toArgb()
-            line.contains("needs love") -> p.red.toArgb()
+            line.contains("needs love") || line.contains("slipping:") -> p.red.toArgb()
+            line.contains("◆") || line.contains(" mind ") || line.contains(" money ") -> p.purple.toArgb()
             else -> p.fg.toArgb()
         }
         c.drawText(line, 40f, y, paint)

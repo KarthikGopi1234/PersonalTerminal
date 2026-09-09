@@ -42,7 +42,7 @@ import java.util.zip.ZipOutputStream
 /** Serialisable snapshot of the whole database + user preferences. */
 @Serializable
 data class BackupPayload(
-    val schemaVersion: Int = 4,
+    val schemaVersion: Int = 5,
     val appVersion: String,
     val createdAt: Long,
     val routines: List<Routine>,
