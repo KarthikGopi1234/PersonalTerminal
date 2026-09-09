@@ -120,6 +120,13 @@ have been removed rather than left open.
 - **5.6 Health Connect** reads steps, exercise sessions, sleep sessions and hydration; the device needs the Health
   Connect app (Android 14 has it built in).
 
+## Release discipline (0.3.7 →)
+
+One bundle per version, and every version must pass the **upgrade gate** before it is published:
+migrations from every shipped schema (`UpgradeTest`), restore of every backup format ever written
+(`LegacyBackupTest`), no public component renamed (`ContractTest`), release APK signed with the pinned key,
+plus the advisory install-over-install rehearsal on an emulator. Details in the README.
+
 ## Still open
 
 1. **Ambient sounds (2.4)** – rain / brown noise / keyboard clicks under the timer.

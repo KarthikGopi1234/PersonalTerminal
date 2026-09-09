@@ -1,0 +1,42 @@
+# Public contract of Personal Terminal – names that must survive every update.
+# Checked by ContractTest (unit tests, part of the CI gate). Append freely; never remove
+# without a migration story in the same commit.
+#
+# Storage – renaming either one makes an update start with empty data.
+db:personal_terminal.db
+datastore:settings
+
+# Launcher activity + icon aliases (a placed launcher icon points at the alias name).
+.MainActivity
+dev.personalterminal.LauncherClassic
+dev.personalterminal.LauncherPrompt
+dev.personalterminal.LauncherWatch
+dev.personalterminal.LauncherCheckbox
+dev.personalterminal.LauncherAmber
+dev.personalterminal.LauncherMono
+ViewPermissionUsageActivity
+
+# Home-screen widgets – a placed widget is bound to the receiver class name.
+.widget.HabitWidgetReceiver
+.widget.StreakWidgetReceiver
+.widget.TimerWidgetReceiver
+action:dev.personalterminal.ACTION_WIDGET_REFRESH
+
+# Notifications / automation (Tasker, adb, shortcuts).
+.reminders.ReminderActionReceiver
+.automation.AutomationReceiver
+action:dev.personalterminal.action.COMPLETE
+action:dev.personalterminal.action.INCREMENT
+action:dev.personalterminal.action.SET
+action:dev.personalterminal.action.SKIP
+action:dev.personalterminal.action.WEAR
+action:dev.personalterminal.action.TIMER_START
+action:dev.personalterminal.action.TIMER_STOP
+action:dev.personalterminal.action.BACKUP
+
+# Services – running timer + Quick Settings tile.
+.timer.TimerTileService
+.timer.PomodoroService
+
+# Content providers.
+authority:${applicationId}.fileprovider

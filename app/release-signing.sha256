@@ -1,0 +1,4 @@
+# SHA-256 of the release signing certificate (apksigner verify --print-certs).
+# CI refuses to publish a release APK signed with any other key – a changed key would make
+# in-place updates impossible for every installed copy. Generated 2026-09-10, valid to 2056.
+1b8167a4f064790a470d78b20344aac463c72356acfc25ff9e1641dcff1e1fcf

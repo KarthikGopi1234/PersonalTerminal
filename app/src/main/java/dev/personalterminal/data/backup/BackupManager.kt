@@ -176,10 +176,11 @@ class BackupManager(
             zip.write(json.encodeToString(payload).toByteArray(Charsets.UTF_8))
             zip.closeEntry()
 
-            val referenced = (payload.watches.mapNotNull { it.photoPath } + payload.wearLogs.mapNotNull { it.photoPath }).toSet()
+            // blank paths (imports, old rows) would resolve to the photo *directory* – skip anything that is not a file
+            val referenced = (payload.watches.mapNotNull { it.photoPath } + payload.wearLogs.mapNotNull { it.photoPath }).filter { it.isNotBlank() }.toSet()
             referenced.forEach { rel ->
                 val f = watchRepo.photoFile(rel)
-                if (f.exists()) {
+                if (f.isFile) {
                     zip.putNextEntry(ZipEntry("$ENTRY_MEDIA_DIR$rel"))
                     BufferedInputStream(FileInputStream(f)).use { it.copyTo(zip) }
                     zip.closeEntry()
@@ -239,7 +240,7 @@ class BackupManager(
             }
         }
         val p = payload ?: error("archive does not contain $ENTRY_DATA")
-        val referenced = (p.watches.mapNotNull { it.photoPath } + p.wearLogs.mapNotNull { it.photoPath }).map { File(it).name }.toSet()
+        val referenced = (p.watches.mapNotNull { it.photoPath } + p.wearLogs.mapNotNull { it.photoPath }).filter { it.isNotBlank() }.map { File(it).name }.toSet()
         Verification(
             createdAt = p.createdAt, appVersion = p.appVersion, encrypted = encrypted, bytes = bytes.size.toLong(),
             habits = p.habits.size, logs = p.habitLogs.size, watches = p.watches.size, wearLogs = p.wearLogs.size,

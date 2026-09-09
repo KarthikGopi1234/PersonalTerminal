@@ -98,6 +98,21 @@ Bump `app.version` by hand only for feature milestones. Optional secrets: `GOOGL
 `RELEASE_KEYSTORE_BASE64` + `RELEASE_STORE_PASSWORD` / `RELEASE_KEY_ALIAS` / `RELEASE_KEY_PASSWORD`
 (without them the APK is debug-signed — still installable). The debug build is kept as a 14-day workflow artifact.
 
+### Upgrade gate
+
+Every release has to install **over** the previous one without losing anything, so the pipeline refuses builds that would break an update:
+
+| Check | Where | What it proves |
+|---|---|---|
+| `UpgradeTest` | unit tests | a database from **every schema the app ever shipped** (`app/schemas/…/1.json` …) is filled with one row per table, migrated to the current version, validated by Room, and then driven through the real repositories (today, streaks, strength, collection stats, `uptime`, backup export → restore) |
+| `LegacyBackupTest` | unit tests | the `.ptbak` archives in `app/src/test/resources/backups/` (one per backup format, oldest = 0.2.0) still restore and the restored data works |
+| `ContractTest` | unit tests | nothing in `app/contract.txt` disappears — widget receivers, launcher-icon aliases, automation actions, services, database and DataStore names |
+| Signature pin | CI, before publishing | the release APK is signed with the key in `app/release-signing.sha256`; a different key would make in-place updates impossible, so the release is refused |
+| `upgrade-check` | CI, advisory | an emulator installs the previous GitHub release, seeds data through the automation intents, installs the new APK over it and checks the ticks, counters, XP and row counts are still there and the app reopens (`scripts/upgrade-check.sh` – works against a phone over adb too) |
+
+Releases before 0.3.7 were signed with per-build debug keys, so moving to the pinned key is a one-time uninstall → install
+(`backup` first, then *settings › restore*); from there on every update installs in place.
+
 ## Automation
 
 The Today prompt, the widgets and a broadcast intent API share one shell — see

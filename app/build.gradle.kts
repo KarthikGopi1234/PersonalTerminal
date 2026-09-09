@@ -5,6 +5,7 @@ import java.io.File
 import java.util.Properties
 import javax.imageio.ImageIO
 import kotlin.math.abs
+import java.security.KeyStore
 
 plugins {
     alias(libs.plugins.android.application)
@@ -54,6 +55,37 @@ val appVersionCode: Int = ciBuildNumber ?: 1
 fun secret(name: String): String? = localProps.getProperty(name) ?: System.getenv(name)
 val releaseStoreFile: String? = secret("RELEASE_STORE_FILE")
 val hasReleaseKey: Boolean = !releaseStoreFile.isNullOrBlank() && file(releaseStoreFile).exists()
+val releaseStorePassword: String? = secret("RELEASE_STORE_PASSWORD")
+val releaseKeyAlias: String? = secret("RELEASE_KEY_ALIAS")
+
+/**
+ * PKCS12 keystores (what `keytool -genkeypair` writes since JDK 9) protect the key with the *store*
+ * password and silently ignore a different `-keypass`. Try the configured key password first and fall
+ * back to the store password when it does not open the key – a wrong RELEASE_KEY_PASSWORD secret must
+ * not turn into "Failed to read key … final block not properly padded" at packageRelease time.
+ */
+val releaseKeyPassword: String? = run {
+    val configured = secret("RELEASE_KEY_PASSWORD")
+    val storePassword = releaseStorePassword
+    val alias = releaseKeyAlias
+    val storePath = releaseStoreFile
+    if (!hasReleaseKey || storePath == null || storePassword.isNullOrEmpty() || alias.isNullOrEmpty()) return@run configured
+    fun opens(password: String?): Boolean = !password.isNullOrEmpty() && listOf("PKCS12", "JKS").any { type ->
+        runCatching {
+            val ks = KeyStore.getInstance(type)
+            file(storePath).inputStream().use { ks.load(it, storePassword.toCharArray()) }
+            ks.getKey(alias, password.toCharArray()) != null
+        }.getOrDefault(false)
+    }
+    when {
+        opens(configured) -> configured
+        opens(storePassword) -> {
+            logger.warn("RELEASE_KEY_PASSWORD does not open key '$alias' – using the store password (PKCS12 keystores share one password).")
+            storePassword
+        }
+        else -> { logger.warn("Neither RELEASE_KEY_PASSWORD nor RELEASE_STORE_PASSWORD opens key '$alias' in $storePath."); configured }
+    }
+}
 
 android {
     namespace = "dev.personalterminal"
@@ -76,9 +108,9 @@ android {
         if (hasReleaseKey) {
             create("release") {
                 storeFile = file(releaseStoreFile!!)
-                storePassword = secret("RELEASE_STORE_PASSWORD")
-                keyAlias = secret("RELEASE_KEY_ALIAS")
-                keyPassword = secret("RELEASE_KEY_PASSWORD")
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
             }
         }
     }

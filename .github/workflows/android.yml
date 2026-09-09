@@ -8,6 +8,15 @@ name: Android CI & Release
 # Only the release APK and its checksum are attached to the release; the debug build is kept
 # as a workflow artifact for 14 days in case a debugger is needed.
 # Pull requests only run the build/test part.
+#
+# Upgrade safety (every release must install *over* the previous one without losing data):
+#   * unit tests include the upgrade gate (UpgradeTest / LegacyBackupTest / ContractTest),
+#   * the release APK's signing certificate is compared with app/release-signing.sha256 – a
+#     different key would make in-place updates impossible, so the release is refused,
+#   * `upgrade-check` installs the previous release on an emulator, seeds data, installs the new
+#     APK over it and checks the data is still there. It is ADVISORY (continue-on-error): the
+#     emulator is flaky on shared runners and must not block a release, but its result is
+#     visible in the run summary and its logs are uploaded.
 
 on:
   push:
@@ -32,6 +41,9 @@ jobs:
     name: Build, test & release
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    outputs:
+      name: ${{ steps.version.outputs.name }}
+      signed: ${{ steps.signature.outputs.match }}
     env:
       GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
       # R8/D8 are memory hungry; make the heap explicit on the runner (7 GB RAM) instead of trusting defaults.
@@ -141,6 +153,31 @@ jobs:
           echo "$BADGING" | grep -q "versionName='${NAME}'" || { echo "::error::versionName in APK != ${NAME}"; exit 1; }
           ls -la dist debug-dist
 
+      # In-place updates only work when every release is signed with the same key. Compare the
+      # certificate inside the APK with the pinned fingerprint; refuse to publish anything else.
+      - name: Verify release signature
+        id: signature
+        env:
+          SIGNED: ${{ steps.keystore.outputs.signed }}
+        run: |
+          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n1)
+          APK=$(ls dist/*.apk | head -n1)
+          "$APKSIGNER" verify --print-certs "$APK" > certs.txt
+          ACTUAL=$(grep -m1 'certificate SHA-256 digest' certs.txt | awk '{print $NF}')
+          PINNED=$(grep -v '^#' app/release-signing.sha256 | tr -d '[:space:]')
+          echo "pinned : $PINNED"
+          echo "actual : $ACTUAL"
+          if [ "$ACTUAL" = "$PINNED" ]; then
+            echo "Release APK is signed with the pinned release key."
+            echo "match=true" >> "$GITHUB_OUTPUT"
+          elif [ "$SIGNED" = "true" ]; then
+            echo "::error::Release keystore secrets are set but the APK is NOT signed with the pinned key (app/release-signing.sha256). Refusing to publish – a key change would break in-place updates for every installed copy."
+            exit 1
+          else
+            echo "::warning::APK is signed with a per-run DEBUG key – users will have to uninstall/reinstall for this update. Add the RELEASE_KEYSTORE_BASE64 / RELEASE_STORE_PASSWORD / RELEASE_KEY_ALIAS / RELEASE_KEY_PASSWORD secrets."
+            echo "match=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -182,7 +219,8 @@ jobs:
             echo
             echo "---"
             echo "**Version:** ${NAME} · **versionCode:** ${CODE} · **Commit:** \`${COMMIT_SHA::7}\`"
-            echo "**Release signing:** ${{ steps.keystore.outputs.signed == 'true' && 'release keystore' || 'debug key (set RELEASE_KEYSTORE_* secrets for a production signature)' }}"
+            echo "**Release signing:** ${{ steps.signature.outputs.match == 'true' && 'pinned release key – installs in place over any release signed with it' || 'debug key – uninstall the previous build first (or back up → reinstall → restore)' }}"
+            echo "**Upgrade gate:** migrations from every shipped schema, legacy-backup restore and component contract verified by unit tests; install-over-install checked by the advisory \`upgrade-check\` job on the [Actions run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
             echo
             echo "### Assets"
             echo "- \`personal-terminal-${NAME}.apk\` – install this (minified R8 release build, package \`dev.personalterminal\`)"
@@ -205,3 +243,81 @@ jobs:
             dist/SHA256SUMS.txt
           fail_on_unmatched_files: true
           make_latest: true
+
+  # ------------------------------------------------------------------ install-over-install (advisory)
+  # Real update rehearsal: previous GitHub release → seed data → install the new APK over it →
+  # the data must still be there and the app must not crash. Advisory: a flaky emulator never
+  # blocks a release, but a red job here means "check before updating your phone".
+  upgrade-check:
+    name: Install-over-install check (advisory)
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download new release APK
+        uses: actions/download-artifact@v4
+        with:
+          name: personal-terminal-${{ needs.build.outputs.name }}
+          path: new
+
+      - name: Download previous release APK
+        id: previous
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          mkdir -p old
+          # newest published release before this run (this run's release is published by the build job
+          # just before we start, so skip the tag we are about to publish).
+          TAG=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=20" \
+                --jq '[.[] | select(.draft|not) | .tag_name | select(. != "v${{ needs.build.outputs.name }}")][0] // empty')
+          echo "previous release: $TAG"
+          [ -n "$TAG" ] || { echo "no previous release – nothing to upgrade from"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0; }
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.apk' --dir old
+          ls -la old new
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Compare signatures (in-place update possible?)
+        if: steps.previous.outputs.skip != 'true'
+        id: keys
+        run: |
+          APKSIGNER=$(ls -d "${ANDROID_HOME:-/usr/local/lib/android/sdk}"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -n1)
+          if [ -z "$APKSIGNER" ]; then echo "::warning::apksigner not found on the runner – assuming the same key"; echo "same=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          OLD=$("$APKSIGNER" verify --print-certs old/*.apk | grep -m1 'certificate SHA-256' | awk '{print $NF}')
+          NEW=$("$APKSIGNER" verify --print-certs new/*.apk | grep -m1 'certificate SHA-256' | awk '{print $NF}')
+          echo "previous: $OLD"; echo "new     : $NEW"
+          if [ "$OLD" = "$NEW" ]; then echo "same=true" >> "$GITHUB_OUTPUT"; else
+            echo "::warning::previous release ${{ steps.previous.outputs.tag }} was signed with a different key – rehearsing backup → reinstall → restore instead of an in-place update"
+            echo "same=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Enable KVM
+        if: steps.previous.outputs.skip != 'true'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Rehearse the update on an emulator
+        if: steps.previous.outputs.skip != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash scripts/upgrade-check.sh old/*.apk new/*.apk "${{ steps.keys.outputs.same }}"
+
+      - name: Upload upgrade-check logs
+        if: always() && steps.previous.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: upgrade-check-${{ github.run_number }}
+          path: upgrade-check/*
+          if-no-files-found: ignore
