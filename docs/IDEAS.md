@@ -27,6 +27,48 @@ A8 strap swap log, A9 backup heartbeat + verify, A11 `stats <habit>`, A13 mornin
 | A14 | **Habit dependencies** (`journal` after `meditate`) – the dependent habit is dimmed until its parent is done, then highlighted. | Habit stacking is the technique; the UI can enforce the order gently. | M |
 | A15 | **Local on-device widgets for the vault** – a 2×2 widget showing today's watch photo and a `next: Cartier (14 d)` line. | The watch side has no widget yet. | M |
 
+## Next majors (B-list, surveyed September 2026)
+
+What the established habit apps (Init Habits, Loop, Habitify, Atoms, Way of Life, Beeminder), the
+dedicated watch-collection apps (Lugs, WristTrack, Horologe) and the focus timers (Tide, Forest,
+Session) do that Personal Terminal does not yet – filtered for a one-person, no-store, terminal-styled
+app. Generic mechanics only; nothing that copies another app's names, copy or branding.
+
+### Habits
+
+| # | Idea | Why it earns its place | Effort |
+|---|------|------------------------|--------|
+| B1 | **Habit strength** – a Loop-style exponential score per habit (`strength 87%`) that decays a little on a miss and recovers with completions, next to the streak. Sparkline on the row, "weakest first" sort on Today, strength in `stats`, review and achievements. | Streaks are binary; strength is the forgiving number that tells you a habit is *slipping* before it breaks | M |
+| B2 | **Minimum version + ramping targets** – `min 2 pages` on a 20-page habit: hitting the minimum keeps the streak as a partial `[~] min`, stats show full vs minimum rate; `target 10 → 30 over 8 weeks` ramps the target automatically (A4). | The two-minute rule / lazy-day version is the strongest anti-abandonment idea in the genre | M |
+| B3 | **Challenges & bounded habits** – start and end dates (`day 12/30`), biweekly and monthly schedules, a challenge card with a progress bar, a monospace certificate when it completes, optional XP stake that is lost on failure. | 30-day challenges, monthly reviews and "every 2 weeks" are real habits the scheduler cannot express today | M |
+| B4 | **Habit stacking** – `after meditate` anchors a habit to another; Today shows the stack `meditate → journal → stretch`, greys the follower until the anchor is done, and can *remind when the anchor completes* instead of at a clock time (A14). | Event-based reminders are the one reminder type no habit app offers; stacking is how habits are actually built | S/M |
+| B5 | **Comeback nudge + evening summary** – gone quiet for 3 days → one gentle line ("3 habits waiting, streaks are shielded"); an optional 21:30 summary that can replace the per-habit check-ins. | Reminders get muted when they are noisy; a single adaptive line survives | S |
+| B6 | **Life areas & balance** – tag habits body / mind / work / people, an ASCII radar in the weekly review, "nothing for *people* in 9 days". | Shows the shape of the week, not just the count | S/M |
+
+### Watches
+
+| # | Idea | Why it earns its place | Effort |
+|---|------|------------------------|--------|
+| B7 | **Watch lifecycle** – status owned / in repair / sold (sale price + date → realised gain), in-repair banner tied to the service drop-off, collection value over time as a sparkline. | Collections change; archived-or-not loses the money story | M |
+| B8 | **Wishlist** – brand, model, target price, link, notes, photo, "saved so far"; converts to an owned watch carrying the price. Profile line: `next: BB58 · 62% funded`. | Every collector app has one; ours can tie the fund to XP milestones | M |
+| B9 | **`uptime` for mechanical watches** – power-reserve hours per watch + last worn → "running / stopped ~2 d ago", a "set date" nudge after 30-day months and February for non-perpetual calendars, a wind-and-set checklist before wearing, moon-phase age for moonphase dials. | Genuinely useful and nobody does it as a first-class feature; the pun writes itself | S/M |
+| B10 | **Collection report + documents** – multiple photos per watch (dial, caseback, papers), receipt / warranty attachments, and an insurance-style PDF: photo, reference, serial, purchase, value, service history, totals. | The one export that matters when something goes wrong | M |
+| B11 | **Rotation challenges** – "wear every watch once this month 3/4", "no repeats this week"; folds into B3. | Turns `watch next` into a game for bigger collections | S |
+
+### Focus & terminal feel
+
+| # | Idea | Why it earns its place | Effort |
+|---|------|------------------------|--------|
+| B12 | **Ambient sounds** (roadmap 2.4) – procedurally generated brown / pink noise, rain and mechanical-keyboard clicks (no audio assets), independent volume, stops on the break. | The last open focus-timer item; the sound becomes the cue for focus | M |
+| B13 | **ASCII garden** – every focus session grows a plant on a `garden` screen (box/Braille art), idle days wilt it, a year becomes a field. | Forest-style growth without a cartoon; pure delight | M |
+| B14 | **Screensaver + keyboard TUI** – matrix rain / game of life / starfield after idle (opt-in, for a docked phone or tablet), `j`/`k`/`space` on hardware keyboards. | Cheap character for the terminal metaphor | S/M |
+| B15 | **App lock** – biometric / PIN on launch and after N minutes, optional secure-window flag so valuations never show in recents. | Watch values and wrist shots are personal | S |
+| B16 | **`sshd` – terminal over LAN** – the app serves a token-protected text UI on Wi-Fi (`http://phone:7331`) with the same command shell (`done`, `wear`, `stats`) and a read-only heatmap; a keyboard on a laptop drives the phone. | The honest answer to "web app + sync" for a one-person, one-phone setup | L |
+| B17 | **App blocking during focus** – usage-stats + overlay that bounces chosen apps while a session runs. | Real focus protection – but hard to verify headlessly and fragile across OEMs | L |
+
+Suggested bundles: **0.3.5** = B1 + B2 + B4 + B5 (habit loop) · **0.3.6** = B7 + B8 + B9 + B11 (watches) ·
+**0.3.7** = B12 + B13 + B14 + B15 (focus & feel) · **0.4.0** = B3 + B6 + B10, then B16 on its own.
+
 ## Polish audit (0.3.2)
 
 Fixed in 0.3.3:
