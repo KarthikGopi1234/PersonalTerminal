@@ -92,6 +92,39 @@ class DriveSync(
         }
     }
 
+    /**
+     * Backup health check: downloads the newest archive in the Drive folder and runs a dry-run
+     * restore on it ([BackupManager.verifyArchive]). Records the result for the profile heartbeat.
+     */
+    suspend fun verifyLatest(accessToken: String? = null, passphrase: String? = null): Outcome {
+        val token = accessToken ?: when (val a = auth.authorizeDrive()) {
+            is GoogleAuth.AuthzResult.Granted -> a.accessToken
+            is GoogleAuth.AuthzResult.NeedsResolution -> return Outcome.NeedsConsent(a.intent)
+            is GoogleAuth.AuthzResult.Error -> return Outcome.Failure(a.message)
+        }
+        return try {
+            val client = DriveClient(token)
+            val folder = prefs.current().driveFolderId.ifBlank { client.ensureFolder() }
+            val newest = client.list(folder).maxByOrNull { it.modifiedAt } ?: return Outcome.Failure("no backups in Drive yet")
+            val tmp = File(context.cacheDir, "verify_${System.currentTimeMillis()}.bin")
+            FileOutputStream(tmp).use { client.download(newest.id, it) }
+            val v = FileInputStream(tmp).use { backups.verifyArchive(it, passphrase) }
+            tmp.delete()
+            val msg = (if (v.ok) "ok: " else "warn: ${v.photosMissing} photos missing · ") + "${newest.name} · ${v.summary}"
+            prefs.setBackupVerified(System.currentTimeMillis(), msg)
+            prefs.setBackupStats(newest.size, v.photosPresent)
+            Outcome.Success(msg)
+        } catch (e: BackupManager.PassphraseRequired) {
+            prefs.setBackupVerified(System.currentTimeMillis(), "error: ${e.message}")
+            Outcome.Failure(e.message ?: "passphrase required")
+        } catch (e: Exception) {
+            Log.w(TAG, "verify failed", e)
+            val msg = e.message ?: e.javaClass.simpleName
+            prefs.setBackupVerified(System.currentTimeMillis(), "error: $msg")
+            Outcome.Failure(msg)
+        }
+    }
+
     private suspend fun fail(msg: String): Outcome.Failure {
         prefs.setBackupStatus("error: $msg")
         return Outcome.Failure(msg)

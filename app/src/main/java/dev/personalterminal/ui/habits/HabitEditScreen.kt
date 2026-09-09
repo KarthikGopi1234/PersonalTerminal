@@ -330,6 +330,25 @@ fun HabitEditScreen(app: PersonalTerminalApp, nav: NavHostController, habitId: L
             TermButton("cancel", onClick = { nav.popBackStack() }, color = p.fgDim)
         }
         if (original != null) {
+            TerminalPanel(title = "pause", titleColor = p.yellow) {
+                val today = dev.personalterminal.domain.AppClock.today()
+                val pausedLabel = dev.personalterminal.domain.Schedule.pauseLabel(original!!, today)
+                var until by remember(original) { mutableStateOf("") }
+                if (pausedLabel != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(pausedLabel, color = p.yellow, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                        TermButton("resume now", color = p.green, onClick = { scope.launch { app.habits.pauseHabit(original!!, null) } })
+                    }
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        listOf("1w", "2w", "1m").forEach { q -> TermButton(q, color = p.yellow, onClick = { scope.launch { app.habits.pauseHabit(original!!, dev.personalterminal.domain.Schedule.parseUntil(q, today)) } }) }
+                        TermTextField(value = until, onValueChange = { until = it.take(10) }, placeholder = "yyyy-mm-dd", keyboardType = KeyboardType.Number, modifier = Modifier.weight(1f), prompt = "until ", imeAction = ImeAction.Done)
+                        val parsed = dev.personalterminal.domain.Schedule.parseUntil(until, today)
+                        TermButton("go", color = p.yellow, enabled = parsed != null, onClick = { scope.launch { app.habits.pauseHabit(original!!, parsed) } })
+                    }
+                }
+                Comment("paused habits leave today & the widget and come back by themselves; the streak is kept")
+            }
             TerminalPanel(title = "danger zone", titleColor = p.red, borderColor = p.red.copy(alpha = 0.5f)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TermButton("archive", color = p.yellow, onClick = { scope.launch { app.habits.setArchived(original!!, true); nav.popBackStack() } })

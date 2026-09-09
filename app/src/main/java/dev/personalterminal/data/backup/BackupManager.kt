@@ -13,6 +13,8 @@ import dev.personalterminal.data.db.FocusSession
 import dev.personalterminal.data.db.WatchService
 import dev.personalterminal.data.db.AccuracyReading
 import dev.personalterminal.data.db.SkipRule
+import dev.personalterminal.data.db.SleepLog
+import dev.personalterminal.data.db.StrapSwap
 import dev.personalterminal.data.db.Strap
 import dev.personalterminal.data.prefs.NotificationPrefs
 import dev.personalterminal.data.prefs.Settings
@@ -40,7 +42,7 @@ import java.util.zip.ZipOutputStream
 /** Serialisable snapshot of the whole database + user preferences. */
 @Serializable
 data class BackupPayload(
-    val schemaVersion: Int = 3,
+    val schemaVersion: Int = 4,
     val appVersion: String,
     val createdAt: Long,
     val routines: List<Routine>,
@@ -58,6 +60,9 @@ data class BackupPayload(
     val straps: List<Strap> = emptyList(),
     // schema 3 (0.3.2): streak-insurance rules
     val skipRules: List<SkipRule> = emptyList(),
+    // schema 4 (0.3.4): sleep anchors + strap swap history
+    val sleepLogs: List<SleepLog> = emptyList(),
+    val strapSwaps: List<StrapSwap> = emptyList(),
 )
 
 @Serializable
@@ -101,10 +106,12 @@ data class BackupNotifications(
     val streakRiskMinStreak: Int = 3,
     val weeklyReview: Boolean = false,
     val weeklyReviewMinutes: Int = 18 * 60,
+    val morningBriefing: Boolean = false,
+    val morningBriefingMinutes: Int = 7 * 60 + 30,
 ) {
-    fun toPrefs() = NotificationPrefs(habitReminders, habitCheckIn, checkInMinutes, wearLog, wearLogMinutes, watchService, timerAlerts, streakRisk, streakRiskMinutes, streakRiskMinStreak, weeklyReview, weeklyReviewMinutes)
+    fun toPrefs() = NotificationPrefs(habitReminders, habitCheckIn, checkInMinutes, wearLog, wearLogMinutes, watchService, timerAlerts, streakRisk, streakRiskMinutes, streakRiskMinStreak, weeklyReview, weeklyReviewMinutes, morningBriefing, morningBriefingMinutes)
     companion object {
-        fun from(n: NotificationPrefs) = BackupNotifications(n.habitReminders, n.habitCheckIn, n.checkInMinutes, n.wearLog, n.wearLogMinutes, n.watchService, n.timerAlerts, n.streakRisk, n.streakRiskMinutes, n.streakRiskMinStreak, n.weeklyReview, n.weeklyReviewMinutes)
+        fun from(n: NotificationPrefs) = BackupNotifications(n.habitReminders, n.habitCheckIn, n.checkInMinutes, n.wearLog, n.wearLogMinutes, n.watchService, n.timerAlerts, n.streakRisk, n.streakRiskMinutes, n.streakRiskMinStreak, n.weeklyReview, n.weeklyReviewMinutes, n.morningBriefing, n.morningBriefingMinutes)
     }
 }
 
@@ -141,6 +148,8 @@ class BackupManager(
             accuracyReadings = db.accuracyDao().getAll(),
             straps = db.strapDao().getAll(),
             skipRules = db.skipRuleDao().getAll(),
+            sleepLogs = db.sleepDao().getAll(),
+            strapSwaps = db.strapSwapDao().getAll(),
         )
     }
 
@@ -186,8 +195,63 @@ class BackupManager(
         // keep only the newest local archive to save space
         backupDir.listFiles()?.forEach { it.delete() }
         val file = File(backupDir, fileName(encrypted = prefs.current().backupPassphrase.isNotBlank()))
-        FileOutputStream(file).use { writeArchive(it) }
+        val media = FileOutputStream(file).use { writeArchive(it) }
+        prefs.setBackupStats(file.length(), media)
         file
+    }
+
+    /** What [verifyArchive] found inside an archive – nothing is written to the database. */
+    data class Verification(
+        val createdAt: Long, val appVersion: String, val encrypted: Boolean, val bytes: Long,
+        val habits: Int, val logs: Int, val watches: Int, val wearLogs: Int, val photosReferenced: Int, val photosPresent: Int,
+    ) {
+        val photosMissing: Int get() = photosReferenced - photosPresent
+        val ok: Boolean get() = photosMissing == 0
+        val summary: String
+            get() = "$habits habits · $logs logs · $watches watches · $photosPresent/$photosReferenced photos" + (if (encrypted) " · encrypted" else "")
+    }
+
+    /**
+     * Full dry-run restore: decrypts (when needed), unzips, parses the JSON with the current schema
+     * and checks every referenced photo is in the archive. Throws [PassphraseRequired] like
+     * [restoreArchive]; any other exception means the archive is corrupt.
+     */
+    suspend fun verifyArchive(input: InputStream, passphrase: String? = null): Verification = withContext(Dispatchers.IO) {
+        val bytes = input.readBytes()
+        val encrypted = bytes.size >= BackupCrypto.MAGIC.size && bytes.copyOf(BackupCrypto.MAGIC.size).contentEquals(BackupCrypto.MAGIC)
+        val plain = if (encrypted) {
+            val candidates = listOfNotNull(passphrase, prefs.current().backupPassphrase.takeIf { it.isNotBlank() })
+            if (candidates.isEmpty()) throw PassphraseRequired("archive is encrypted – enter the backup passphrase")
+            candidates.firstNotNullOfOrNull { p -> runCatching { BackupCrypto.decrypt(bytes, p) }.getOrNull() }
+                ?: throw PassphraseRequired("wrong passphrase for this archive")
+        } else bytes
+        var payload: BackupPayload? = null
+        val present = mutableSetOf<String>()
+        ZipInputStream(BufferedInputStream(java.io.ByteArrayInputStream(plain))).use { zip ->
+            var entry: ZipEntry? = zip.nextEntry
+            while (entry != null) {
+                when {
+                    entry.name == ENTRY_DATA -> payload = json.decodeFromString(BackupPayload.serializer(), zip.readBytes().toString(Charsets.UTF_8))
+                    entry.name.startsWith(ENTRY_MEDIA_DIR) && !entry.isDirectory -> { present += File(entry.name).name; zip.readBytes() }
+                }
+                zip.closeEntry()
+                entry = zip.nextEntry
+            }
+        }
+        val p = payload ?: error("archive does not contain $ENTRY_DATA")
+        val referenced = (p.watches.mapNotNull { it.photoPath } + p.wearLogs.mapNotNull { it.photoPath }).map { File(it).name }.toSet()
+        Verification(
+            createdAt = p.createdAt, appVersion = p.appVersion, encrypted = encrypted, bytes = bytes.size.toLong(),
+            habits = p.habits.size, logs = p.habitLogs.size, watches = p.watches.size, wearLogs = p.wearLogs.size,
+            photosReferenced = referenced.size, photosPresent = referenced.count { it in present },
+        )
+    }
+
+    /** Verifies a freshly built archive of the *current* data end-to-end (write → read back). */
+    suspend fun selfCheck(): Verification = withContext(Dispatchers.IO) {
+        val buf = java.io.ByteArrayOutputStream()
+        writeArchive(buf)
+        verifyArchive(java.io.ByteArrayInputStream(buf.toByteArray()))
     }
 
     /** Thrown when an encrypted archive is opened without (or with the wrong) passphrase. */
@@ -260,6 +324,8 @@ class BackupManager(
         db.accuracyDao().insertAll(p.accuracyReadings)
         db.strapDao().insertAll(p.straps)
         db.skipRuleDao().insertAll(p.skipRules)
+        db.sleepDao().insertAll(p.sleepLogs)
+        db.strapSwapDao().insertAll(p.strapSwaps)
         prefs.setTheme(p.settings.themeName)
         runCatching { dev.personalterminal.data.prefs.ThemeMode.valueOf(p.settings.themeMode) }.getOrNull()?.let { prefs.setThemeMode(it) }
         prefs.setUsername(p.settings.username)

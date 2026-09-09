@@ -1,6 +1,7 @@
 package dev.personalterminal.domain
 
 import dev.personalterminal.data.db.Habit
+import dev.personalterminal.data.db.isPausedOn
 import dev.personalterminal.data.db.HabitLog
 import dev.personalterminal.data.db.ScheduleType
 import dev.personalterminal.data.db.ShieldUse
@@ -15,6 +16,13 @@ data class StreakInfo(
     val shieldedDays: Int,
     /** Whether there is a broken gap (yesterday or earlier) that a shield could still repair. */
     val repairableDay: LocalDate?,
+    /**
+     * The *repair window*: when the most recent scheduled day (yesterday, or the last due day
+     * before today) was left unlogged and it is still early enough in the day (before
+     * [Streaks.LATE_LOG_CUTOFF_HOUR]), that day can simply be ticked late – no shield spent.
+     * Null outside the window or when that day was completed / skipped / shielded.
+     */
+    val lateLogDay: LocalDate? = null,
 )
 
 /**
@@ -31,11 +39,35 @@ data class StreakInfo(
  */
 object Streaks {
 
+    /** Late logs for the previous scheduled day are accepted until this hour (local time). */
+    const val LATE_LOG_CUTOFF_HOUR = 12
+
+    /**
+     * The previous scheduled day if it is still inside the repair window, else null. Pure: the
+     * caller passes the current hour so the engine stays testable.
+     */
+    fun lateLogDay(habit: Habit, logs: List<HabitLog>, shields: List<ShieldUse>, today: LocalDate, hourNow: Int): LocalDate? {
+        if (hourNow >= LATE_LOG_CUTOFF_HOUR) return null
+        if (habit.negative || habit.schedule == ScheduleType.WEEKLY) return null
+        val created = LocalDate.ofEpochDay(minOf(habit.createdAt.toLocalDateEpochDay(), logs.minOfOrNull { it.day } ?: Long.MAX_VALUE))
+        // last due day strictly before today, looking back at most a week (a longer gap is not a "forgot to log")
+        var d = today.minusDays(1)
+        var prev: LocalDate? = null
+        repeat(7) { if (prev == null) { if (!d.isBefore(created) && Schedule.isDue(habit, d)) prev = d else d = d.minusDays(1) } }
+        val day = prev ?: return null
+        val e = day.toEpochDay()
+        val log = logs.firstOrNull { it.day == e }
+        if (log?.completed == true || log?.skipped == true) return null
+        if (shields.any { it.day == e }) return null
+        return day
+    }
+
     fun compute(
         habit: Habit,
         logs: List<HabitLog>,
         shields: List<ShieldUse>,
         today: LocalDate = AppClock.today(),
+        hourNow: Int = AppClock.now().hour,
     ): StreakInfo {
         val completedDays: Set<Long> = logs.filter { it.completed && !it.skipped }.map { it.day }.toSet()
         // Skipped days bridge the chain for free (sick, travelling …) – like a shield that isn't spent.
@@ -105,6 +137,7 @@ object Streaks {
             completions = completedDays.size,
             shieldedDays = shieldedInCurrent,
             repairableDay = repairable,
+            lateLogDay = lateLogDay(habit, logs, shields, today, hourNow),
         )
     }
 
@@ -172,6 +205,8 @@ object Streaks {
         val quota = habit.timesPerWeek.coerceAtLeast(1)
 
         val thisWeek = Schedule.weekStart(today)
+        // a week that overlaps the pause window is bridged (unless the quota was met anyway)
+        fun paused(weekStart: LocalDate) = habit.pausedUntil > 0L && (0..6).any { habit.isPausedOn(weekStart.plusDays(it.toLong())) }
         var current = 0
         var week = thisWeek
         var shielded = 0
@@ -183,6 +218,7 @@ object Streaks {
             when {
                 done -> current++
                 week in shieldedWeeks -> shielded++
+                paused(week) -> { /* paused week bridges the chain */ }
                 firstIteration -> { /* current week still in progress */ }
                 else -> { repairable = week.plusDays(6); break }
             }
@@ -198,6 +234,7 @@ object Streaks {
             when {
                 done -> { run++; if (run > best) best = run }
                 w in shieldedWeeks -> {}
+                paused(w) -> {}
                 w == thisWeek -> {}
                 else -> run = 0
             }

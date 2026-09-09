@@ -4,6 +4,8 @@ import dev.personalterminal.domain.AppClock
 import dev.personalterminal.data.db.AppDatabase
 import dev.personalterminal.data.db.DayCount
 import dev.personalterminal.data.db.Habit
+import dev.personalterminal.data.db.SleepLog
+import dev.personalterminal.data.db.isPausedOn
 import dev.personalterminal.data.db.HabitLog
 import dev.personalterminal.data.db.HabitType
 import dev.personalterminal.data.db.HabitWithLogs
@@ -41,6 +43,7 @@ class HabitRepository(private val db: AppDatabase) {
     private val xpDao = db.xpDao()
     private val sessionDao = db.focusSessionDao()
     private val ruleDao = db.skipRuleDao()
+    private val sleepDao = db.sleepDao()
 
     /** Emits whenever a mutation happened – lets the widget and other non-Flow consumers refresh. */
     val mutations = MutableStateFlow(0L)
@@ -102,8 +105,9 @@ class HabitRepository(private val db: AppDatabase) {
         val weekStart = Schedule.weekStart(date).toEpochDay()
         val weekCount = if (hwl.habit.schedule == ScheduleType.WEEKLY)
             hwl.logs.count { it.completed && it.day in weekStart..(weekStart + 6) } else 0
-        val due = when (hwl.habit.schedule) {
-            ScheduleType.WEEKLY -> weekCount < hwl.habit.timesPerWeek || log?.completed == true
+        val due = when {
+            hwl.habit.isPausedOn(epoch) -> false
+            hwl.habit.schedule == ScheduleType.WEEKLY -> weekCount < hwl.habit.timesPerWeek || log?.completed == true
             else -> Schedule.isDue(hwl.habit, date)
         }
         return HabitStatus(hwl.habit, log, streak, due, weekCount)
@@ -147,6 +151,18 @@ class HabitRepository(private val db: AppDatabase) {
     suspend fun deleteHabit(habit: Habit) { habitDao.delete(habit); bump() }
 
     suspend fun setArchived(habit: Habit, archived: Boolean) { habitDao.update(habit.copy(archived = archived)); bump() }
+
+    /**
+     * Pause [habit] until [until] (exclusive – the habit is back on that day); null resumes it now.
+     * Unlike archiving the habit keeps its place and returns by itself; unlike insurance the paused
+     * days are simply not scheduled, so nothing is written to the log.
+     */
+    suspend fun pauseHabit(habit: Habit, until: LocalDate?) {
+        val today = AppClock.today().toEpochDay()
+        val epoch = until?.toEpochDay() ?: 0L
+        habitDao.update(if (epoch > today) habit.copy(pausedFrom = today, pausedUntil = epoch) else habit.copy(pausedFrom = 0L, pausedUntil = 0L))
+        bump()
+    }
 
     suspend fun moveHabit(habit: Habit, delta: Int) {
         val siblings = habitDao.getAll().filter { it.routineId == habit.routineId }.toMutableList()
@@ -408,6 +424,22 @@ class HabitRepository(private val db: AppDatabase) {
         }
     }
 
+    /**
+     * Repair window: marks [day] (the previous scheduled day) as done after the fact. Same effect as
+     * ticking it on the day – value = target, XP awarded once, streak restored – with a note so the
+     * journal shows it was logged late. No shield is spent.
+     */
+    suspend fun logLate(habitId: Long, day: LocalDate) {
+        val habit = habitDao.getById(habitId) ?: return
+        val epoch = day.toEpochDay()
+        val existing = logDao.get(habitId, epoch)
+        if (existing?.completed == true) return
+        val items = if (habit.type == HabitType.CHECKLIST) allItemsMask(habit) else existing?.items ?: 0L
+        val note = existing?.note?.takeIf { it.isNotBlank() } ?: "logged late"
+        logDao.upsert(existing.carry(habitId, epoch, habit.target.coerceAtLeast(1), true, items).copy(note = note))
+        afterChange(habit, epoch, existing?.completed == true, true, day)
+    }
+
     // ------------------------------------------------------------------ shields
 
     /** Spend a shield to bridge the gap on [day] for [habitId]. Returns false when no shield available. */
@@ -418,6 +450,36 @@ class HabitRepository(private val db: AppDatabase) {
         bump()
         return inserted != -1L
     }
+
+    // ------------------------------------------------------------------ sleep anchors
+
+    fun observeSleep(day: LocalDate): Flow<SleepLog?> = sleepDao.observe(day.toEpochDay())
+    fun observeSleepRange(from: LocalDate, to: LocalDate): Flow<List<SleepLog>> = sleepDao.observeRange(from.toEpochDay(), to.toEpochDay())
+    suspend fun sleepRange(from: LocalDate, to: LocalDate): List<SleepLog> = sleepDao.getRange(from.toEpochDay(), to.toEpochDay())
+    suspend fun sleep(day: LocalDate): SleepLog? = sleepDao.get(day.toEpochDay())
+
+    /**
+     * Log one side of the night ending on [wakeDay]. Manual entries always win; a Health Connect
+     * value only fills in what the user has not typed themselves.
+     */
+    suspend fun logSleep(wakeDay: LocalDate, bedMinutes: Int? = null, wakeMinutes: Int? = null, source: String = SleepLog.SOURCE_MANUAL, note: String? = null) {
+        val epoch = wakeDay.toEpochDay()
+        val existing = sleepDao.get(epoch)
+        val manual = source == SleepLog.SOURCE_MANUAL
+        if (!manual && existing?.source == SleepLog.SOURCE_MANUAL && existing.bedMinutes != null && existing.wakeMinutes != null) return
+        val merged = SleepLog(
+            day = epoch,
+            bedMinutes = if (manual) bedMinutes ?: existing?.bedMinutes else existing?.bedMinutes ?: bedMinutes,
+            wakeMinutes = if (manual) wakeMinutes ?: existing?.wakeMinutes else existing?.wakeMinutes ?: wakeMinutes,
+            source = if (manual || existing == null) source else existing.source,
+            note = note ?: existing?.note ?: "",
+            updatedAt = System.currentTimeMillis(),
+        )
+        if (merged.bedMinutes == null && merged.wakeMinutes == null) sleepDao.delete(epoch) else sleepDao.upsert(merged)
+        bump()
+    }
+
+    suspend fun clearSleep(wakeDay: LocalDate) { sleepDao.delete(wakeDay.toEpochDay()); bump() }
 
     // ------------------------------------------------------------------ misc
 

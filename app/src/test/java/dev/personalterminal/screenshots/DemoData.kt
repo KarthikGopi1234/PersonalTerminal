@@ -55,6 +55,7 @@ object DemoData {
         // heatmap is not a solid block, and an unbroken run for the last few weeks for the streak counters.
         val rnd = Random(42)
         val start = today.minusDays(120)
+        val missedJournal = mutableSetOf<LocalDate>()
         var d = start
         while (d.isBefore(today)) {
             val age = java.time.temporal.ChronoUnit.DAYS.between(d, today).toInt()
@@ -68,7 +69,7 @@ object DemoData {
             if (did(0.7) && d.dayOfWeek.value <= 5) habits.setValue(focus, 50 + rnd.nextInt(30), d)
             if (did(0.75) && d.dayOfWeek.value <= 5) habits.toggle(commit, d)
             if (did(0.65)) habits.setValue(read, 20 + rnd.nextInt(25), d)
-            if (did(0.6)) habits.toggle(journal, d)
+            if (did(0.6)) habits.toggle(journal, d) else missedJournal += d
             if (d.dayOfWeek.value in setOf(1, 3, 5) && did(0.8)) habits.toggle(workout, d)
             if (age in 1..39 && !recent && rnd.nextDouble() < 0.12) habits.logSlip(noSugar, true, d)
             if (age == 30) habits.skip(journal, "travelling", d)
@@ -90,6 +91,15 @@ object DemoData {
                 }
             }
             sd = sd.plusDays(1)
+        }
+        // Sleep anchors for the last five weeks; short nights land on the days the journal was skipped
+        // (plus a couple of random ones) so the insights panel has both groups and a believable lift.
+        for (i in 0 until 35) {
+            val night = today.minusDays(i.toLong())
+            val short = night in missedJournal || i % 11 == 5
+            val bed = if (short) 60 + rnd.nextInt(30) else -45 + rnd.nextInt(40) // 01:00–01:30 vs 23:15–23:55
+            val wake = 6 * 60 + 30 + rnd.nextInt(30)
+            habits.logSleep(night, bedMinutes = bed, wakeMinutes = wake)
         }
         // Today: a morning that is half done.
         habits.setValue(meditate, 10, today)
@@ -113,9 +123,13 @@ object DemoData {
         val gshock = watches.saveWatch(Watch(brand = "Casio", model = "GW-M5610", nickname = "square", movement = "tough solar", caseSizeMm = 43.2f, color = "green", photoPath = photo(app, "casio", 0xFF202020.toInt(), 0xFF50FA7B.toInt()),
             purchasePrice = 210.0, currency = "AUD", purchaseDay = today.minusDays(900).toEpochDay()))
         // Straps, service log and accuracy readings for the watch tracker screens.
-        val suede = watches.saveStrap(dev.personalterminal.data.db.Strap(name = "brown suede", material = "leather", color = "brown", widthMm = 20, watchId = seiko))
-        watches.saveStrap(dev.personalterminal.data.db.Strap(name = "bond nato", material = "nato", color = "grey/black", widthMm = 20))
-        watches.saveStrap(dev.personalterminal.data.db.Strap(name = "flat link bracelet", material = "bracelet", color = "steel", widthMm = 20, watchId = speedy))
+        val suede = watches.saveStrap(dev.personalterminal.data.db.Strap(name = "brown suede", material = "leather", color = "brown", widthMm = 20))
+        val nato = watches.saveStrap(dev.personalterminal.data.db.Strap(name = "bond nato", material = "nato", color = "grey/black", widthMm = 20))
+        val bracelet = watches.saveStrap(dev.personalterminal.data.db.Strap(name = "flat link bracelet", material = "bracelet", color = "steel", widthMm = 20))
+        // Swap log: the bracelet has been on the speedy for a month, the suede went on the 62MAS three weeks ago after a nato spell.
+        watches.fitStrap(db.strapDao().getById(bracelet)!!, speedy, today.minusDays(31))
+        watches.fitStrap(db.strapDao().getById(nato)!!, seiko, today.minusDays(40))
+        watches.fitStrap(db.strapDao().getById(suede)!!, seiko, today.minusDays(23), "summer strap")
         watches.saveService(dev.personalterminal.data.db.WatchService(watchId = speedy, day = today.minusDays(400).toEpochDay(), kind = "service", cost = 950.0, notes = "full service, new mainspring", nextDueDay = today.plusDays(1425).toEpochDay()))
         watches.saveService(dev.personalterminal.data.db.WatchService(watchId = cartier, day = today.minusDays(20).toEpochDay(), kind = "battery", cost = 45.0))
         watches.saveService(dev.personalterminal.data.db.WatchService(watchId = seiko, day = today.minusDays(90).toEpochDay(), kind = "strap", notes = "fitted brown suede"))

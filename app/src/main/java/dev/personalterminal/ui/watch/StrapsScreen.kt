@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,6 +58,9 @@ fun StrapsScreen(app: PersonalTerminalApp, nav: NavHostController) {
     val watches by remember { app.watches.observeWatches() }.collectAsStateWithLifecycle(initialValue = emptyList())
     val counts by remember { app.watches.observeStrapCounts() }.collectAsStateWithLifecycle(initialValue = emptyList())
     val wornCount = counts.associate { it.watchId to it.count }
+    val swaps by app.watches.observeStrapSwaps().collectAsStateWithLifecycle(initialValue = emptyList())
+    var fitDays by remember { mutableStateOf<Map<Long, Int>>(emptyMap()) }
+    LaunchedEffect(straps, swaps) { fitDays = app.watches.strapFitSummaries() }
     var name by remember { mutableStateOf("") }
     var material by remember { mutableStateOf("leather") }
     var color by remember { mutableStateOf("") }
@@ -103,7 +107,7 @@ fun StrapsScreen(app: PersonalTerminalApp, nav: NavHostController) {
                     Tag(st.material, p.purple)
                     if (st.color.isNotBlank()) Tag(st.color)
                     st.widthMm?.let { Tag("${it}mm") }
-                    Tag(fitted?.let { "on ${it.displayName}" } ?: "in drawer", if (fitted != null) p.cyan else p.fgDim)
+                    Tag(fitted?.let { "on ${it.displayName}" + (fitDays[st.id]?.let { d -> " · ${d}d" } ?: "") } ?: "in drawer", if (fitted != null) p.cyan else p.fgDim)
                 }
                 Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("fit to:", color = p.fgDim, style = MaterialTheme.typography.labelSmall)
@@ -112,6 +116,23 @@ fun StrapsScreen(app: PersonalTerminalApp, nav: NavHostController) {
                         val sel = w.id == st.watchId
                         Text(if (sel) "[${w.displayName}]" else " ${w.displayName} ", color = if (sel) p.purple else p.fgDim, style = MaterialTheme.typography.labelSmall, modifier = Modifier.clickable { scope.launch { app.watches.fitStrap(st, w.id) } })
                     }
+                }
+            }
+        }
+        if (swaps.isNotEmpty()) {
+            item(key = "swaps") {
+                Spacer(Modifier.height(4.dp))
+                TerminalPanel(title = "swap log", titleColor = p.purple) {
+                    swaps.take(12).forEach { sw ->
+                        val strapName = straps.firstOrNull { it.id == sw.strapId }?.name ?: "strap #${sw.strapId}"
+                        val target = sw.watchId?.let { id -> watches.firstOrNull { it.id == id }?.displayName ?: "watch #$id" } ?: "drawer"
+                        Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(java.time.LocalDate.ofEpochDay(sw.day).format(java.time.format.DateTimeFormatter.ofPattern("dd MMM")).lowercase(), color = p.fgDim, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(52.dp))
+                            Text("$strapName → $target", color = p.fg, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            if (sw.note.isNotBlank()) Text(sw.note, color = p.fgDim, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    Comment("`strap <strap> <watch>` from the prompt logs a swap too")
                 }
             }
         }

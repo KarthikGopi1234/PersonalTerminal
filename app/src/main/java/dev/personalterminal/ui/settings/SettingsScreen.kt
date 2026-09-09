@@ -158,6 +158,13 @@ fun SettingsScreen(
             is DriveSync.Outcome.NeedsConsent -> handleConsent(r.intent) { t -> doBackup(t) }
         }
     }
+    suspend fun doVerify(token: String? = null) {
+        when (val r = app.driveSync.verifyLatest(token)) {
+            is DriveSync.Outcome.Success -> say("verify ${r.message}")
+            is DriveSync.Outcome.Failure -> say("verify failed: ${r.message}")
+            is DriveSync.Outcome.NeedsConsent -> handleConsent(r.intent) { t -> doVerify(t) }
+        }
+    }
     suspend fun doList(token: String? = null) {
         app.driveSync.listRemote(token).onSuccess { remote = it; say("found ${it.size} backups in Drive") }
             .onFailure { e -> if (e is DriveSync.ConsentRequired) handleConsent(e.intent) { t -> doList(t) } else say("list failed: ${e.message}") }
@@ -274,6 +281,9 @@ fun SettingsScreen(
             }
             ToggleLine("compact live update: icon + time left only (status chip / island)", settings.compactLiveUpdate) { scope.launch { app.prefs.setCompactLiveUpdate(it) } }
             Comment("per-habit focus/break lengths live in `habit edit` · quick settings tile + widget can start the timer")
+            if (android.os.Build.MANUFACTURER.lowercase() in setOf("oppo", "oneplus", "realme")) {
+                Comment("colorOS / oxygenOS: the island shows the countdown only after settings › notifications & quick settings › live alerts › app alert is turned on for this app")
+            }
         }
 
         // ---------------- health connect ----------------
@@ -317,6 +327,8 @@ fun SettingsScreen(
                 KeyValue("folder", DriveClient.FOLDER_NAME + "/")
                 KeyValue("last backup", if (settings.lastBackupAt == 0L) "never" else fmt(settings.lastBackupAt))
                 if (settings.lastBackupStatus.isNotBlank()) Text(settings.lastBackupStatus, color = if (settings.lastBackupStatus.startsWith("ok")) p.green else p.red, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                KeyValue("last verified", if (settings.lastVerifiedAt == 0L) "never" else fmt(settings.lastVerifiedAt))
+                if (settings.lastVerifiedStatus.isNotBlank()) Text(settings.lastVerifiedStatus, color = if (settings.lastVerifiedStatus.startsWith("ok")) p.green else if (settings.lastVerifiedStatus.startsWith("warn")) p.yellow else p.red, style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable {
                     scope.launch { val en = !settings.autoBackup; app.prefs.setAutoBackup(en); DriveSync.schedule(ctx, en, settings.backupIntervalHours) }
@@ -339,6 +351,7 @@ fun SettingsScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TermButton("backup now", color = p.yellow, filled = true, enabled = !busy, onClick = { scope.launch { busy = true; doBackup(); busy = false } })
                     TermButton("list", color = p.yellow, enabled = !busy, onClick = { scope.launch { busy = true; doList(); busy = false } })
+                    TermButton("verify", color = p.cyan, enabled = !busy, onClick = { scope.launch { busy = true; doVerify(); busy = false } })
                     TermButton("sign out", color = p.fgDim, enabled = !busy, onClick = { scope.launch { app.googleAuth.signOut(); app.prefs.setDriveAccount("", ""); app.prefs.setAutoBackup(false); DriveSync.schedule(ctx, false, 24); remote = null; say("signed out") } })
                 }
                 remote?.let { list ->
@@ -562,6 +575,8 @@ private fun NotificationsPanel(app: PersonalTerminalApp, settings: dev.personalt
         }
         NotifLine("weekly review", "sunday evening: review --week is ready", n.weeklyReview, master,
             minutes = n.weeklyReviewMinutes, onMinutes = { m -> update { it.copy(weeklyReviewMinutes = m) } }) { update { it.copy(weeklyReview = !it.weeklyReview) } }
+        NotifLine("morning briefing", "one line a day: habits due, sleep, watch suggestion, streaks at risk", n.morningBriefing, master,
+            minutes = n.morningBriefingMinutes, onMinutes = { m -> update { it.copy(morningBriefingMinutes = m) } }) { update { it.copy(morningBriefing = !it.morningBriefing) } }
         Spacer(Modifier.height(6.dp))
         Text("# watches", color = p.fgDim, style = MaterialTheme.typography.labelSmall)
         NotifLine("log today's watch", "if nothing is on the wrist yet · suggests `watch next` with a one-tap \"wear it\"", n.wearLog, master,

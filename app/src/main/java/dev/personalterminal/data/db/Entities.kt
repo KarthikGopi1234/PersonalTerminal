@@ -93,7 +93,19 @@ data class Habit(
     @ColumnInfo(defaultValue = "''") val checklist: String = "",
     /** Today-screen section: MORNING / AFTERNOON / EVENING / ANY (see [TimeOfDay]); "" = ANY. */
     @ColumnInfo(defaultValue = "''") val timeOfDay: String = "",
+    /**
+     * Pause with a return date (epoch day, exclusive): while `today < pausedUntil` the habit is not
+     * due – it leaves Today, the widget and the reminders, and paused days neither count nor break
+     * the streak. 0 = not paused. See [isPausedOn].
+     */
+    @ColumnInfo(defaultValue = "0") val pausedUntil: Long = 0L,
+    /** First paused epoch day (the day the pause was set) – history before it is untouched. */
+    @ColumnInfo(defaultValue = "0") val pausedFrom: Long = 0L,
 )
+
+/** True when [epochDay] falls inside the habit's pause window `[pausedFrom, pausedUntil)`. */
+fun Habit.isPausedOn(epochDay: Long): Boolean = pausedUntil > 0L && epochDay >= pausedFrom && epochDay < pausedUntil
+fun Habit.isPausedOn(date: java.time.LocalDate): Boolean = isPausedOn(date.toEpochDay())
 
 /** Sub-items of a checklist habit (empty for other types). */
 val Habit.checklistItems: List<String>
@@ -346,5 +358,44 @@ data class Strap(
     /** Watch this strap is currently fitted to (null = in the drawer). */
     val watchId: Long? = null,
     val notes: String = "",
+    val createdAt: Long = AppClock.clock.millis(),
+)
+
+/**
+ * Sleep anchors for one night, keyed by the *wake day*. Minutes are relative to that day's midnight,
+ * so a 23:30 bedtime the evening before is -30 and a 06:45 wake is 405. Either side may be missing
+ * until logged (`sleep 23:30` in the evening, `wake 06:45` in the morning, or Health Connect).
+ */
+@Serializable
+@Entity(tableName = "sleep_logs")
+data class SleepLog(
+    @PrimaryKey val day: Long,
+    val bedMinutes: Int? = null,
+    val wakeMinutes: Int? = null,
+    /** [SOURCE_MANUAL] wins over [SOURCE_HEALTH] – a manual entry is never overwritten by the sync. */
+    val source: String = SOURCE_MANUAL,
+    val note: String = "",
+    val updatedAt: Long = AppClock.clock.millis(),
+) {
+    companion object {
+        const val SOURCE_MANUAL = "manual"
+        const val SOURCE_HEALTH = "health"
+    }
+}
+
+/**
+ * Strap swap log – one row every time a strap is fitted to a watch (or taken off: `watchId = null`).
+ * The current fit lives on [Strap.watchId]; this table is the history behind "on speedy for 23 days".
+ */
+@Serializable
+@Entity(tableName = "strap_swaps", indices = [Index("strapId"), Index("watchId")])
+data class StrapSwap(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val strapId: Long,
+    /** Watch the strap went on; null = back in the drawer. */
+    val watchId: Long? = null,
+    /** Epoch day of the swap. */
+    val day: Long,
+    val note: String = "",
     val createdAt: Long = AppClock.clock.millis(),
 )

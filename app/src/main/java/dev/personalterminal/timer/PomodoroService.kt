@@ -87,7 +87,14 @@ class PomodoroService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        if (intent == null || intent.action == ACTION_TICK) {
+            // Heartbeat alarm, or START_STICKY re-delivery after the process was killed mid-session:
+            // re-derive the phase from the persisted end time and repaint the notification.
+            if (_state.value.phase == Phase.IDLE) restoreSession()
+            resync()
+            return START_STICKY
+        }
+        when (intent.action) {
             ACTION_START -> {
                 val focus = intent.getIntExtra(EXTRA_FOCUS_MIN, 25)
                 val brk = intent.getIntExtra(EXTRA_BREAK_MIN, 5)
@@ -117,6 +124,7 @@ class PomodoroService : Service() {
         )
         goForeground()
         startTicker()
+        persistSession()
         FocusDnd.enter(this)
     }
 
@@ -142,7 +150,98 @@ class PomodoroService : Service() {
         )
         goForeground()
         startTicker()
+        persistSession()
         if (phase == Phase.FOCUS) FocusDnd.enter(this) else FocusDnd.exit(this)
+    }
+
+    // ------------------------------------------------------------------ resilience
+
+    /**
+     * Brings the in-memory state in line with the wall clock. Called from the heartbeat alarm and
+     * on process restart: if the device dozed or ColorOS froze the process, the ticker missed
+     * seconds and the compact title (a snapshot of the clock) went stale on the island while the
+     * system chronometer kept counting – this repaints it and finishes an overdue phase.
+     */
+    private fun resync() {
+        val s = _state.value
+        if (s.phase == Phase.IDLE) return
+        if (!s.running) { updateNotification(); return }
+        if (s.isStopwatch) {
+            val elapsed = ((System.currentTimeMillis() - s.endsAtMs) / 1000).toInt().coerceAtLeast(0)
+            _state.value = s.copy(elapsedSeconds = elapsed, focusedSeconds = elapsed)
+            updateNotification()
+        } else {
+            val remaining = ((s.endsAtMs - System.currentTimeMillis() + 999) / 1000).toInt().coerceIn(0, s.totalSeconds)
+            val focused = if (s.phase == Phase.FOCUS) s.totalSeconds - remaining else s.focusedSeconds
+            _state.value = s.copy(remainingSeconds = remaining, focusedSeconds = focused)
+            if (remaining == 0) { onPhaseFinished(); return }
+            updateNotification()
+        }
+        if (ticker?.isActive != true) startTicker()
+        scheduleHeartbeat()
+    }
+
+    /**
+     * Exact alarm every 30 s (and precisely at the phase end) while running. An alarm delivery
+     * unfreezes the process, so even under aggressive OEM battery management the notification is
+     * repainted and the phase flips on time. Falls back to an inexact alarm where exact ones are
+     * not permitted.
+     */
+    private fun scheduleHeartbeat() {
+        val s = _state.value
+        if (!s.running || s.phase == Phase.IDLE) { cancelHeartbeat(); return }
+        val now = System.currentTimeMillis()
+        var at = now + HEARTBEAT_MS
+        if (!s.isStopwatch && s.endsAtMs in (now + 1000)..at) at = s.endsAtMs + 300
+        val am = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+        val pi = heartbeatIntent()
+        runCatching {
+            val exact = Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()
+            if (exact) am.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, at, pi)
+            else am.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, at, pi)
+        }.onFailure { runCatching { am.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, at, pi) } }
+    }
+
+    private fun cancelHeartbeat() {
+        runCatching { (getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager).cancel(heartbeatIntent()) }
+    }
+
+    private fun heartbeatIntent(): PendingIntent = PendingIntent.getService(
+        this, HEARTBEAT_RC, Intent(this, PomodoroService::class.java).setAction(ACTION_TICK),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
+    /** Persists what is needed to rebuild the session after a process kill (see [restoreSession]). */
+    private fun persistSession() {
+        val s = _state.value
+        val prefs = getSharedPreferences(SESSION_PREFS, Context.MODE_PRIVATE).edit()
+        if (s.phase == Phase.IDLE) { prefs.clear().apply(); return }
+        prefs.putString("phase", s.phase.name).putBoolean("running", s.running)
+            .putInt("total", s.totalSeconds).putInt("remaining", s.remainingSeconds).putInt("cycle", s.cycle)
+            .putLong("habitId", s.habitId).putString("habitName", s.habitName)
+            .putLong("endsAt", s.endsAtMs).putLong("startedAt", s.startedAtMs).putInt("elapsed", s.elapsedSeconds)
+            .putInt("cfgFocus", config.focus).putInt("cfgBreak", config.brk).putInt("cfgLong", config.longBrk)
+            .apply()
+    }
+
+    /** Rebuilds a running session from [persistSession] data – only if it can still be meaningful. */
+    private fun restoreSession() {
+        val p = getSharedPreferences(SESSION_PREFS, Context.MODE_PRIVATE)
+        val phase = runCatching { Phase.valueOf(p.getString("phase", null) ?: return) }.getOrNull() ?: return
+        if (phase == Phase.IDLE) return
+        val endsAt = p.getLong("endsAt", 0L)
+        val running = p.getBoolean("running", false)
+        // A countdown that ended more than 10 minutes ago is history, not a session to resume.
+        if (phase != Phase.STOPWATCH && running && endsAt < System.currentTimeMillis() - 10 * 60_000L) { p.edit().clear().apply(); return }
+        config = Config(p.getInt("cfgFocus", 25), p.getInt("cfgBreak", 5), p.getInt("cfgLong", 15))
+        _state.value = TimerState(
+            phase = phase, running = running, totalSeconds = p.getInt("total", 0), remainingSeconds = p.getInt("remaining", 0),
+            cycle = p.getInt("cycle", 0), habitId = p.getLong("habitId", 0L), habitName = p.getString("habitName", "") ?: "",
+            endsAtMs = endsAt, startedAtMs = p.getLong("startedAt", 0L), elapsedSeconds = p.getInt("elapsed", 0),
+            focusedSeconds = if (phase == Phase.STOPWATCH) p.getInt("elapsed", 0) else 0,
+        )
+        goForeground()
+        if (running) { startTicker(); scheduleHeartbeat() }
     }
 
     /**
@@ -156,21 +255,48 @@ class PomodoroService : Service() {
             while (isActive) {
                 val now = System.currentTimeMillis()
                 delay(1000 - now % 1000) // align to the next second boundary
-                val s = _state.value
-                if (!s.running) continue
-                if (s.isStopwatch) {
-                    val elapsed = ((System.currentTimeMillis() - s.endsAtMs) / 1000).toInt().coerceAtLeast(0)
-                    if (elapsed != s.elapsedSeconds) {
-                        _state.value = s.copy(elapsedSeconds = elapsed, focusedSeconds = elapsed)
-                        if (elapsed % 5 == 0) updateNotification()
+                try {
+                    val s = _state.value
+                    if (!s.running) continue
+                    if (s.isStopwatch) {
+                        val elapsed = ((System.currentTimeMillis() - s.endsAtMs) / 1000).toInt().coerceAtLeast(0)
+                        if (elapsed != s.elapsedSeconds) {
+                            _state.value = s.copy(elapsedSeconds = elapsed, focusedSeconds = elapsed)
+                            if (elapsed % 5 == 0) updateNotification()
+                        }
+                        continue
                     }
-                    continue
+                    val remaining = ((s.endsAtMs - System.currentTimeMillis() + 999) / 1000).toInt().coerceIn(0, s.totalSeconds)
+                    if (remaining == s.remainingSeconds) continue
+                    val focused = if (s.phase == Phase.FOCUS) s.totalSeconds - remaining else s.focusedSeconds
+                    _state.value = s.copy(remainingSeconds = remaining, focusedSeconds = focused)
+                    if (remaining == 0) onPhaseFinished() else updateNotification()
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    android.util.Log.w("PomodoroService", "tick failed: ${e.message}") // never let one bad tick kill the countdown
                 }
-                val remaining = ((s.endsAtMs - System.currentTimeMillis() + 999) / 1000).toInt().coerceIn(0, s.totalSeconds)
-                if (remaining == s.remainingSeconds) continue
-                val focused = if (s.phase == Phase.FOCUS) s.totalSeconds - remaining else s.focusedSeconds
-                _state.value = s.copy(remainingSeconds = remaining, focusedSeconds = focused)
-                if (remaining == 0) onPhaseFinished() else updateNotification()
+            }
+        }
+        holdWakeLock(true)
+        scheduleHeartbeat()
+    }
+
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
+
+    /** Partial wake lock while a phase is running: keeps the one-second ticker honest under doze. */
+    private fun holdWakeLock(hold: Boolean) {
+        runCatching {
+            if (hold) {
+                if (wakeLock?.isHeld == true) return
+                val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+                wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "personalterminal:timer").also {
+                    it.setReferenceCounted(false)
+                    it.acquire(4 * 60 * 60 * 1000L) // hard cap: 4 h, in case stop() is never reached
+                }
+            } else {
+                wakeLock?.takeIf { it.isHeld }?.release()
+                wakeLock = null
             }
         }
     }
@@ -200,10 +326,13 @@ class PomodoroService : Service() {
     private fun pause() {
         val s = _state.value
         if (!s.running) return
-        if (s.isStopwatch) { _state.value = s.copy(running = false); updateNotification(); return }
+        holdWakeLock(false)
+        cancelHeartbeat()
+        if (s.isStopwatch) { _state.value = s.copy(running = false); updateNotification(); persistSession(); return }
         val remaining = ((s.endsAtMs - System.currentTimeMillis() + 999) / 1000).toInt().coerceIn(0, s.totalSeconds)
         _state.value = s.copy(running = false, remainingSeconds = remaining)
         updateNotification()
+        persistSession()
     }
 
     private fun resume() {
@@ -215,7 +344,10 @@ class PomodoroService : Service() {
         } else {
             _state.value = s.copy(running = true, endsAtMs = System.currentTimeMillis() + s.remainingSeconds * 1000L)
         }
+        holdWakeLock(true)
+        scheduleHeartbeat()
         updateNotification()
+        persistSession()
     }
 
     private fun skip() {
@@ -235,7 +367,10 @@ class PomodoroService : Service() {
         val s = _state.value
         if (creditPartial && (s.phase == Phase.FOCUS || s.isStopwatch)) recordSession(s, s.focusedSeconds / 60, completed = s.isStopwatch)
         ticker?.cancel()
+        holdWakeLock(false)
+        cancelHeartbeat()
         _state.value = TimerState()
+        persistSession()
         FocusDnd.exit(this)
         NotificationManagerCompat.from(this).cancel(ALERT_NOTIF_ID)
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -284,6 +419,8 @@ class PomodoroService : Service() {
         }
         // Compact mode keeps the promoted surface (island / chip) to icon + time: the title *is* the
         // countdown, everything else moves to the second line which those surfaces don't show.
+        // (OEM capsules render the title; the AOSP chip renders the chronometer set below – both
+        // are fed, so whichever the device shows keeps counting.)
         val title = if (compact) (if (s.running) s.clock else "${s.clock} ‖") else "$phaseLabel $glyph ${s.clock}" + if (!s.running) " (paused)" else ""
         val bar = if (s.isStopwatch) "elapsed" else asciiBar(s.fraction, 16)
         val text = buildString {
@@ -381,6 +518,10 @@ class PomodoroService : Service() {
     override fun onDestroy() {
         ticker?.cancel()
         prefsJob?.cancel()
+        holdWakeLock(false)
+        // Keep the heartbeat armed when a *running* session is being torn down by the system: the
+        // next alarm restarts the service and restoreSession() picks the countdown back up.
+        if (!_state.value.running) cancelHeartbeat()
         super.onDestroy()
     }
 
@@ -393,6 +534,10 @@ class PomodoroService : Service() {
         const val ACTION_SKIP = "dev.personalterminal.timer.SKIP"
         const val ACTION_STOP = "dev.personalterminal.timer.STOP"
         const val ACTION_STOPWATCH = "dev.personalterminal.timer.STOPWATCH"
+        const val ACTION_TICK = "dev.personalterminal.timer.TICK"
+        private const val HEARTBEAT_MS = 30_000L
+        private const val HEARTBEAT_RC = 7001
+        private const val SESSION_PREFS = "timer_session"
         const val EXTRA_FOCUS_MIN = "focus"
         const val EXTRA_BREAK_MIN = "break"
         const val EXTRA_LONG_BREAK_MIN = "long_break"

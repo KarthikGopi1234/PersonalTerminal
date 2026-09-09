@@ -10,6 +10,7 @@ import dev.personalterminal.data.db.WearLogWithWatch
 import dev.personalterminal.data.db.WatchService
 import dev.personalterminal.data.db.AccuracyReading
 import dev.personalterminal.data.db.Strap
+import dev.personalterminal.data.db.StrapSwap
 import dev.personalterminal.data.db.displayName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -24,6 +25,7 @@ class WatchRepository(private val context: Context, private val db: AppDatabase)
     private val serviceDao = db.watchServiceDao()
     private val accuracyDao = db.accuracyDao()
     private val strapDao = db.strapDao()
+    private val swapDao = db.strapSwapDao()
 
     val photoDir: File get() = File(context.filesDir, PHOTO_DIR).apply { mkdirs() }
 
@@ -253,12 +255,37 @@ class WatchRepository(private val context: Context, private val db: AppDatabase)
     fun observeStrapCounts(): Flow<List<WatchCount>> = wearDao.observeStrapCounts()
     suspend fun straps(): List<Strap> = strapDao.getAll()
     suspend fun saveStrap(s: Strap): Long = strapDao.insert(s)
-    suspend fun deleteStrap(s: Strap) = strapDao.delete(s)
-    /** Fit [strap] to [watchId] (null = back in the drawer). Only one strap per watch at a time. */
-    suspend fun fitStrap(strap: Strap, watchId: Long?) {
-        if (watchId != null) strapDao.getAll().filter { it.watchId == watchId && it.id != strap.id }.forEach { strapDao.update(it.copy(watchId = null)) }
+    suspend fun deleteStrap(s: Strap) { swapDao.deleteForStrap(s.id); strapDao.delete(s) }
+    /**
+     * Fit [strap] to [watchId] (null = back in the drawer). Only one strap per watch at a time; the
+     * displaced strap goes to the drawer. Every change is appended to the swap log, and today's wear
+     * entry for the watch inherits the new strap.
+     */
+    suspend fun fitStrap(strap: Strap, watchId: Long?, date: LocalDate = AppClock.today(), note: String = "") {
+        if (strap.watchId == watchId) return
+        val day = date.toEpochDay()
+        if (watchId != null) strapDao.getAll().filter { it.watchId == watchId && it.id != strap.id }.forEach {
+            strapDao.update(it.copy(watchId = null))
+            swapDao.insert(StrapSwap(strapId = it.id, watchId = null, day = day, note = "replaced by ${strap.name}"))
+        }
         strapDao.update(strap.copy(watchId = watchId))
+        swapDao.insert(StrapSwap(strapId = strap.id, watchId = watchId, day = day, note = note))
+        if (watchId != null) wearDao.getForWatchAndDay(watchId, day).firstOrNull()?.let { wearDao.update(it.copy(strapId = strap.id)) }
     }
+
+    fun observeStrapSwaps(limit: Int = 30): Flow<List<StrapSwap>> = swapDao.observeRecent(limit)
+    suspend fun strapSwaps(strapId: Long): List<StrapSwap> = swapDao.getForStrap(strapId)
+
+    /** Days the strap has been on its current watch (null when in the drawer or never logged). */
+    suspend fun strapFittedDays(strap: Strap, today: LocalDate = AppClock.today()): Int? {
+        if (strap.watchId == null) return null
+        val last = swapDao.latestForStrap(strap.id)?.takeIf { it.watchId == strap.watchId } ?: return null
+        return (today.toEpochDay() - last.day).toInt().coerceAtLeast(0)
+    }
+
+    /** "on speedy · 23 d" style summary per strap for the straps page. */
+    suspend fun strapFitSummaries(today: LocalDate = AppClock.today()): Map<Long, Int> =
+        strapDao.getAll().filter { it.watchId != null }.mapNotNull { s -> strapFittedDays(s, today)?.let { s.id to it } }.toMap()
 
     // ------------------------------------------------------------------ CSV export
 

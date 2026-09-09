@@ -6,15 +6,15 @@
 
 ## What it does
 
-- **Habits** — checkbox, counter (`5/8 cups`), timer, *checklist* (`pack gym bag` → shoes, towel, bottle…) and *avoid* modes (`no sugar`: clean days grow the streak, a slip breaks it); routines with daily / weekly / custom schedules, or Today grouped by time of day; 22 templates; per-habit reminders plus an evening *check-in* ("did you do X today?" with done / skip buttons), streak-at-risk notices and quiet hours; skip-with-reason, completion notes and mood.
-- **Streaks, shields & insurance** — earned streak freezes protect a chain after a missed day; skips bridge it for free; *insurance rules* auto-skip travel, sick leave or weekly rest days (`away travel 3d` … `back`).
-- **Command line** — a real prompt on Today: `done stretch`, `add 2 water`, `tick gym bag towel`, `timer 25 focus`, `wear speedy`, `skip run -- sick`, `away travel 3d`, `remind read 21:00`, `watch next`, `help`.
-- **Focus** — pomodoro with per-habit intervals, stopwatch mode, optional Do-Not-Disturb, session history on its own heatmap, Quick Settings tile, live countdown notification (Android 16 Live Update).
-- **Insights** — GitHub-style heatmap, XP and levels, weekly review and `review --year` as shareable monospace cards, achievements as a man page, per-habit heatmaps and cross-habit correlations.
-- **Widgets** — tick habits off from the home screen (today list), plus status and timer widgets; app shortcuts; Tasker / adb intent API; Health Connect auto-completion.
-- **Watch tracker** — photograph today's watch, an optional daily "which watch today?" notice with a one-tap *wear it*, a *vault* grid colour-coded by days since worn, "on this day" wrist-shot memories on the timeline, collection stats (wear share, neglected, cost per wear), service log with reminders, accuracy / drift, strap library, `watch next` rotation suggester, purchase & valuation, CSV export.
-- **Backup** — automatic Google Drive backups (optionally AES-256 encrypted), restore on first launch, local export/import, importers for Loop Habit Tracker and Habitica.
-- **Notifications, your way** — every notification the app can send (habit reminders, check-in, streak at risk, weekly review, wear log, service due, timer alerts) has its own switch and time under settings › notifications, behind one master switch and shared quiet hours.
+- **Habits** — checkbox, counter (`5/8 cups`), timer, *checklist* (`pack gym bag` → shoes, towel, bottle…) and *avoid* modes (`no sugar`: clean days grow the streak, a slip breaks it); routines with daily / weekly / custom schedules, or Today grouped by time of day; weekly quotas that tell you `2/3 · last chance today`; *pause* a habit until a date (`pause run 2w`) and it comes back by itself; 22 templates; per-habit reminders plus an evening *check-in* ("did you do X today?" with done / skip buttons), streak-at-risk notices, an opt-in one-line *morning briefing* and quiet hours; skip-with-reason, completion notes and mood.
+- **Streaks, shields & insurance** — forgot to log yesterday? Until noon `[ did it yesterday ]` ticks it late for free (the *repair window*); after that earned streak freezes protect a chain after a missed day; skips bridge it for free; *insurance rules* auto-skip travel, sick leave or weekly rest days (`away travel 3d` … `back`).
+- **Command line** — a real prompt on Today: `done stretch`, `add 2 water`, `tick gym bag towel`, `timer 25 focus`, `wear speedy`, `skip run -- sick`, `yesterday read`, `pause run 2w`, `sleep 23:30` / `wake 06:45`, `stats read`, `strap bond nato speedy`, `away travel 3d`, `remind read 21:00`, `watch next`, `help`.
+- **Focus** — pomodoro with per-habit intervals, stopwatch mode, optional Do-Not-Disturb, session history on its own heatmap, Quick Settings tile, live countdown notification (Android 16 Live Update / ColorOS capsule) that survives doze and process kills.
+- **Insights** — GitHub-style heatmap, XP and levels, weekly review and `review --year` as shareable monospace cards, achievements as a man page, per-habit heatmaps, cross-habit correlations and *sleep anchors* (`sleep 23:30` / `wake 06:45`, or Health Connect) that show what a short night does to each habit; `stats <habit>` prints the 30/90/365-day block at the prompt.
+- **Widgets** — tick habits off from the home screen (today list — live: it re-renders on every change and rolls over at midnight), plus status and timer widgets; app shortcuts; Tasker / adb intent API; Health Connect auto-completion.
+- **Watch tracker** — photograph today's watch, an optional daily "which watch today?" notice with a one-tap *wear it*, a *vault* grid colour-coded by days since worn, "on this day" wrist-shot memories on the timeline, collection stats (wear share, neglected, cost per wear), service log with reminders, accuracy / drift, strap library with a swap log (`on speedy · 23d`), `watch next` rotation suggester, purchase & valuation, CSV export.
+- **Backup** — automatic Google Drive backups (optionally AES-256 encrypted), restore on first launch, local export/import, importers for Loop Habit Tracker and Habitica; a *backup heartbeat* on the profile (`last backup 3 h ago · 1.2 MB · 214 photos`) with `verify` (downloads the newest archive and dry-runs a restore) and a local `self-check`.
+- **Notifications, your way** — every notification the app can send (habit reminders, check-in, streak at risk, weekly review, morning briefing, wear log, service due, timer alerts) has its own switch and time under settings › notifications, behind one master switch and shared quiet hours.
 - **Terminal feel** — 14 themes (Dracula, Nord, Solarized, Gruvbox, Monokai, Catppuccin, Tokyo Night, One Dark, Rosé Pine, Everforest, Amber CRT, Matrix, Hacker, Synthwave '84) or an imported colour scheme, each paired with its own typeface from nine bundled monospace fonts (JetBrains Mono, Fira Code, Roboto Mono, IBM Plex Mono, Source Code Pro, Victor Mono, Space Mono, VT323) · six launcher icons · light & dark · CRT shader · tablet split panes · accessibility mode.
 
 ## Screenshots
@@ -47,9 +47,9 @@
 |:-:|:-:|:-:|:-:|
 | <img src="screenshots/25-watch-box.png" width="200" alt="Watch vault grid colour-coded by days since worn"> | <img src="screenshots/26-year-review.png" width="200" alt="Year in review"> | <img src="screenshots/27-streak-insurance.png" width="200" alt="Streak insurance rules"> | <img src="screenshots/28-theme-tokyo-night.png" width="200" alt="Tokyo Night theme"> |
 
-| Amber CRT · VT323 | Rosé Pine Dawn · Victor Mono | Synthwave '84 · Space Mono | |
+| Amber CRT · VT323 | Rosé Pine Dawn · Victor Mono | Synthwave '84 · Space Mono | Fonts & launcher icons |
 |:-:|:-:|:-:|:-:|
-| <img src="screenshots/29-theme-amber-crt.png" width="200" alt="Amber CRT theme with scanlines"> | <img src="screenshots/30-theme-rose-pine-dawn.png" width="200" alt="Rosé Pine Dawn light theme"> | <img src="screenshots/31-theme-synthwave.png" width="200" alt="Synthwave 84 theme"> | |
+| <img src="screenshots/29-theme-amber-crt.png" width="200" alt="Amber CRT theme with scanlines"> | <img src="screenshots/30-theme-rose-pine-dawn.png" width="200" alt="Rosé Pine Dawn light theme"> | <img src="screenshots/31-theme-synthwave.png" width="200" alt="Synthwave 84 theme"> | <img src="screenshots/32-fonts-icons.png" width="200" alt="Font and launcher icon pickers in settings"> |
 
 Screenshots are rendered from the real screens with demo data by `./gradlew screenshots` (Robolectric, no device needed)
 and double as the golden images for `./gradlew verifyScreenshots`, which CI runs on every push.
@@ -59,6 +59,7 @@ Re-run `screenshots` after an intentional UI change and commit the result.
 
 Grab `personal-terminal-<version>.apk` from the [latest release](https://github.com/KarthikGopi1234/PersonalTerminal/releases/latest)
 and verify it against `SHA256SUMS.txt`. Requires Android 8.0+; the live status-bar countdown needs Android 16.
+On ColorOS / OxygenOS the island capsule appears once *Settings › Notifications & quick settings › Live alerts › App alert* is switched on for the app (off by default for third-party apps).
 
 ## Build
 

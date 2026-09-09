@@ -24,6 +24,7 @@ import dev.personalterminal.data.prefs.Settings
 import dev.personalterminal.domain.AppClock
 import dev.personalterminal.domain.HabitStatus
 import dev.personalterminal.domain.Schedule
+import dev.personalterminal.data.db.ScheduleType
 import dev.personalterminal.ui.navigation.Routes
 import java.time.DayOfWeek
 import java.time.Duration
@@ -52,7 +53,7 @@ object ReminderScheduler {
     private const val GROUP = "habit-reminders"
 
     /** Kinds of scheduled notification; also the tag in the notification id space. */
-    enum class Kind { HABIT, CHECK_IN, WEAR, STREAK, REVIEW }
+    enum class Kind { HABIT, CHECK_IN, WEAR, STREAK, REVIEW, BRIEFING }
 
     data class Slot(val at: LocalDateTime, val kind: Kind)
 
@@ -92,6 +93,7 @@ object ReminderScheduler {
         if (n.wearLog && hasWatches) daily(n.wearLogMinutes, Kind.WEAR)
         if (n.streakRisk && habits.isNotEmpty()) daily(n.streakRiskMinutes, Kind.STREAK)
         if (n.weeklyReview && habits.isNotEmpty()) daily(n.weeklyReviewMinutes, Kind.REVIEW) { it.dayOfWeek == DayOfWeek.SUNDAY }
+        if (n.morningBriefing && (habits.isNotEmpty() || hasWatches)) daily(n.morningBriefingMinutes, Kind.BRIEFING)
         return best
     }
 
@@ -106,7 +108,7 @@ object ReminderScheduler {
         val slot = nextSlot(habits, hasWatches, s.notifications, now) ?: return null
         val label = when (slot.kind) {
             Kind.HABIT -> "habit reminder"; Kind.CHECK_IN -> "check-in"; Kind.WEAR -> "wear log"
-            Kind.STREAK -> "streak check"; Kind.REVIEW -> "weekly review"
+            Kind.STREAK -> "streak check"; Kind.REVIEW -> "weekly review"; Kind.BRIEFING -> "morning briefing"
         }
         val day = when (slot.at.toLocalDate()) {
             now.toLocalDate() -> "today"; now.toLocalDate().plusDays(1) -> "tomorrow"
@@ -149,18 +151,28 @@ object ReminderScheduler {
             }
         }
 
-        // 4. streak at risk – open habits whose current chain is worth protecting
+        // 4. streak at risk – open habits whose current chain is worth protecting, plus weekly
+        //    quotas that can only still be met by doing the habit today (and every remaining day)
         if (n.streakRisk && within(n.streakRiskMinutes)) {
             val atRisk = summary.due.filter { hs -> !hs.completed && !hs.skipped && !hs.habit.negative }
                 .mapNotNull { hs -> app.habits.streakFor(hs.habit.id, today)?.let { hs to it } }
                 .filter { (_, st) -> st.current >= n.streakRiskMinStreak }
                 .sortedByDescending { it.second.current }
-            if (atRisk.isNotEmpty()) postIfAllowed(context, streakNotification(context, atRisk.map { it.first.habit.name to it.second.current }, summary.shieldsAvailable))
+            val lastChance = summary.due.filter { hs -> hs.habit.schedule == ScheduleType.WEEKLY && !hs.completed && !hs.skipped }
+                .map { hs -> hs to Schedule.weekOutlook(hs.habit, hs.weekCount, today) }
+                .filter { (_, o) -> o.lastChance }
+            if (atRisk.isNotEmpty() || lastChance.isNotEmpty()) postIfAllowed(context, streakNotification(context, atRisk.map { it.first.habit.name to it.second.current }, summary.shieldsAvailable, lastChance.map { it.first.habit.name to it.second }))
         }
 
         // 5. weekly review (Sunday)
         if (n.weeklyReview && today.dayOfWeek == DayOfWeek.SUNDAY && within(n.weeklyReviewMinutes) && summary.all.isNotEmpty()) {
             postIfAllowed(context, reviewNotification(context, summary.done, summary.active.size))
+        }
+
+        // 6. morning briefing – one line, once a day
+        if (n.morningBriefing && within(n.morningBriefingMinutes)) {
+            val text = runCatching { Briefing.build(app, summary, today) }.getOrNull()
+            if (text != null) postIfAllowed(context, briefingNotification(context, text))
         }
     }
 
@@ -240,22 +252,44 @@ object ReminderScheduler {
         return NOTIF_WEAR to b.build()
     }
 
-    private fun streakNotification(context: Context, atRisk: List<Pair<String, Int>>, shields: Int): Pair<Int, android.app.Notification> {
+    private fun streakNotification(
+        context: Context, atRisk: List<Pair<String, Int>>, shields: Int,
+        weekly: List<Pair<String, Schedule.WeekOutlook>> = emptyList(),
+    ): Pair<Int, android.app.Notification> {
         val open = activity(context, NOTIF_STREAK, Routes.TODAY)
-        val lead = atRisk.first()
-        val title = if (atRisk.size == 1) "🔥 ${lead.second}-day streak of ${lead.first} ends tonight" else "🔥 ${atRisk.size} streaks end tonight"
-        val lines = atRisk.joinToString("\n") { (name, days) -> "[ ] $name · $days days" }
+        val lead = atRisk.firstOrNull()
+        val title = when {
+            lead != null && atRisk.size == 1 && weekly.isEmpty() -> "🔥 ${lead.second}-day streak of ${lead.first} ends tonight"
+            lead != null -> "🔥 ${atRisk.size + weekly.size} streaks end tonight"
+            weekly.size == 1 -> "📅 ${weekly.first().first}: ${weekly.first().second.label}"
+            else -> "📅 ${weekly.size} weekly quotas need today"
+        }
+        val lines = (atRisk.map { (name, days) -> "[ ] $name · $days days" } + weekly.map { (name, o) -> "[ ] $name · ${o.label}" }).joinToString("\n")
         val footer = if (shields > 0) "⛨ $shields shield${if (shields > 1) "s" else ""} available if you miss" else "no shields left – this one is on you"
         val b = NotificationCompat.Builder(context, PersonalTerminalApp.CHANNEL_REMINDERS)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
-            .setContentText(if (atRisk.size == 1) footer else atRisk.joinToString(", ") { it.first })
+            .setContentText(if (atRisk.size + weekly.size == 1) footer else (atRisk.map { it.first } + weekly.map { it.first }).joinToString(", "))
             .setStyle(NotificationCompat.BigTextStyle().bigText("$lines\n$footer"))
             .setContentIntent(open)
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
         return NOTIF_STREAK to b.build()
+    }
+
+    private fun briefingNotification(context: Context, text: Briefing.Text): Pair<Int, android.app.Notification> {
+        val open = activity(context, NOTIF_BRIEFING, Routes.TODAY)
+        val b = NotificationCompat.Builder(context, PersonalTerminalApp.CHANNEL_REMINDERS)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(text.title)
+            .setContentText(text.line)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text.body))
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+        return NOTIF_BRIEFING to b.build()
     }
 
     private fun reviewNotification(context: Context, done: Int, active: Int): Pair<Int, android.app.Notification> {
@@ -313,6 +347,7 @@ object ReminderScheduler {
     private const val NOTIF_WEAR = 6900
     private const val NOTIF_STREAK = 6901
     private const val NOTIF_REVIEW = 6902
+    private const val NOTIF_BRIEFING = 6903
 }
 
 class ReminderWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {

@@ -5,6 +5,9 @@ import android.content.Context
 import android.util.Log
 import androidx.annotation.Keep
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -56,6 +59,7 @@ import dev.personalterminal.domain.HabitStatus
 import dev.personalterminal.ui.theme.TerminalPalette
 import java.time.LocalDate
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 /**
  * Interactive home-screen widget: today's habits as `[✓] name` rows.
@@ -73,10 +77,15 @@ class HabitWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val app = PersonalTerminalApp.get(context)
-        val summary = runCatching { app.habits.daySummary(AppClock.today()) }.getOrNull()
-        val settings = app.prefs.current()
-        val palette = WidgetTheme.palette(context, settings)
+        // First frame from a one-shot read so the widget never shows "loading…" for long; after
+        // that the composition *observes* the database, so a tap (or any change made in the app)
+        // re-renders the same session instead of waiting for the next full update.
+        val initial = runCatching { app.habits.daySummary(AppClock.today()) }.getOrNull()
+        val initialSettings = app.prefs.current()
         provideContent {
+            val settings by app.prefs.settings.collectAsState(initial = initialSettings)
+            val summary by remember { WidgetTheme.liveSummary(app) }.collectAsState(initial = initial)
+            val palette = WidgetTheme.palette(context, settings)
             GlanceTheme { WidgetContent(summary, settings.prompt, palette) }
         }
     }
@@ -94,7 +103,7 @@ class HabitWidget : GlanceAppWidget() {
             size.height >= MEDIUM.height -> 4
             else -> 2
         }
-        currentState<Preferences>() // subscribe to state so refreshAll() re-composes
+        currentState<Preferences>() // subscribe to state so refreshAll() re-composes even when the data flows are quiet
 
         Column(modifier = GlanceModifier.fillMaxSize().background(bg).cornerRadius(16.dp).padding(10.dp)) {
             // ---- header: the only "open the app" target
@@ -202,6 +211,13 @@ class HabitWidget : GlanceAppWidget() {
                 }
             }
         }
+
+        /** True when at least one widget of any variant is on a home screen. */
+        suspend fun anyPlaced(context: Context): Boolean {
+            val manager = GlanceAppWidgetManager(context)
+            return listOf(HabitWidget::class.java, StreakWidget::class.java, TimerWidget::class.java)
+                .any { runCatching { manager.getGlanceIds(it) }.getOrDefault(emptyList()).isNotEmpty() }
+        }
     }
 }
 
@@ -225,6 +241,13 @@ class ToggleHabitAction : ActionCallback {
             }
             else -> app.habits.addValue(id, 5)
         }
+        // The tapped widget's own session observes the database and re-renders on its own (see
+        // provideGlance); poke its state as well so launchers that only repaint on an explicit
+        // update show the new checkbox immediately, then bring the other widgets along.
+        runCatching {
+            updateAppWidgetState(context, glanceId) { it[HabitWidget.REFRESH_KEY] = System.currentTimeMillis() }
+            HabitWidget().update(context, glanceId)
+        }.onFailure { Log.w(HabitWidget.TAG, "widget self-update failed: ${it.message}") }
         HabitWidget.refreshAll(context)
     }
 }
@@ -232,4 +255,11 @@ class ToggleHabitAction : ActionCallback {
 @Keep
 class HabitWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = HabitWidget()
+    override fun onEnabled(context: Context) { super.onEnabled(context); armRollover(context) }
+    override fun onDisabled(context: Context) { super.onDisabled(context); armRollover(context) }
+}
+
+/** Widget added or last one removed → (re)arm / cancel the midnight rollover job. */
+internal fun armRollover(context: Context) {
+    PersonalTerminalApp.get(context).scope.launch { runCatching { WidgetRollover.schedule(context) } }
 }

@@ -31,6 +31,7 @@ import androidx.navigation.NavHostController
 import dev.personalterminal.PersonalTerminalApp
 import dev.personalterminal.data.db.HabitWithLogs
 import dev.personalterminal.domain.Insights
+import dev.personalterminal.domain.Sleep
 import dev.personalterminal.ui.components.Comment
 import dev.personalterminal.ui.components.ContributionHeatmap
 import dev.personalterminal.ui.components.PromptLine
@@ -48,11 +49,16 @@ fun InsightsScreen(app: PersonalTerminalApp, nav: NavHostController) {
     val mutations by app.habits.mutations.collectAsStateWithLifecycle()
     var habits by remember { mutableStateOf<List<HabitWithLogs>>(emptyList()) }
     var correlations by remember { mutableStateOf<List<Insights.Correlation>>(emptyList()) }
+    var sleepEffects by remember { mutableStateOf<List<Sleep.SleepEffect>>(emptyList()) }
+    var sleepStats by remember { mutableStateOf<Sleep.Stats?>(null) }
     var range by remember { mutableStateOf(90L) }
     LaunchedEffect(mutations, range) {
         val hs = app.habits.activeWithLogs()
         habits = hs
         correlations = Insights.correlations(hs, today.minusDays(range), today)
+        val nights = app.habits.sleepRange(today.minusDays(range), today)
+        sleepStats = Sleep.stats(nights)
+        sleepEffects = Sleep.effects(hs, nights)
     }
 
     Column(
@@ -75,6 +81,21 @@ fun InsightsScreen(app: PersonalTerminalApp, nav: NavHostController) {
                     }
                 }
                 Comment("correlation ≠ causation – but it is a good hint for routine order")
+            }
+        }
+
+        TerminalPanel(title = "sleep", titleColor = p.purple) {
+            val st = sleepStats
+            if (st == null) Comment("no nights logged yet · `sleep 23:30` in the evening, `wake 06:45` in the morning (or link Health Connect)") else {
+                Text(st.line, color = p.fg, style = MaterialTheme.typography.bodyMedium)
+                if (sleepEffects.isEmpty()) Comment("need ≥4 rested and ≥4 short nights (< ${Sleep.formatDuration(Sleep.SHORT_NIGHT_MINUTES)}) to compare habits") else {
+                    sleepEffects.take(6).forEach { e ->
+                        Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                            Text(e.sentence, color = p.fg, style = MaterialTheme.typography.bodyMedium)
+                            Text("  " + e.detail, color = if (e.liftPercent >= 0) p.green else p.red, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
             }
         }
 

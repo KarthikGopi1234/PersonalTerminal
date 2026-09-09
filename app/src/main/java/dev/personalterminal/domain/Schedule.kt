@@ -1,6 +1,7 @@
 package dev.personalterminal.domain
 
 import dev.personalterminal.data.db.Habit
+import dev.personalterminal.data.db.isPausedOn
 import dev.personalterminal.data.db.ScheduleType
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -14,10 +15,25 @@ object Schedule {
     fun toggle(mask: Int, day: DayOfWeek): Int = mask xor bit(day)
 
     /** Whether [habit] is expected to be done on [date]. Weekly habits are "due" every day until the quota is met. */
-    fun isDue(habit: Habit, date: LocalDate): Boolean = when (habit.schedule) {
+    fun isDue(habit: Habit, date: LocalDate): Boolean = !habit.isPausedOn(date) && when (habit.schedule) {
         ScheduleType.DAILY -> true
         ScheduleType.WEEKLY -> true
         ScheduleType.SPECIFIC_DAYS -> isDayEnabled(habit.daysMask, date.dayOfWeek)
+    }
+
+    /** "paused → 01 oct" while the habit is paused, else null. */
+    fun pauseLabel(habit: Habit, today: LocalDate): String? =
+        if (habit.isPausedOn(today)) "paused → " + LocalDate.ofEpochDay(habit.pausedUntil).format(java.time.format.DateTimeFormatter.ofPattern("dd MMM")).lowercase() else null
+
+    /** Parse `until 2026-10-01` / `2026-10-01` / `2w` / `10d` / `1m` into a return date after [today]. */
+    fun parseUntil(arg: String, today: LocalDate): LocalDate? {
+        val a = arg.trim().removePrefix("until").removePrefix("till").trim().lowercase()
+        if (a.isEmpty()) return null
+        Regex("(\\d+)\\s*([dwm])").matchEntire(a)?.let { m ->
+            val n = m.groupValues[1].toLong()
+            return when (m.groupValues[2]) { "d" -> today.plusDays(n); "w" -> today.plusWeeks(n); else -> today.plusMonths(n) }
+        }
+        return runCatching { LocalDate.parse(a) }.getOrNull()?.takeIf { it.isAfter(today) }
     }
 
     fun describe(habit: Habit): String = when (habit.schedule) {
@@ -37,4 +53,29 @@ object Schedule {
 
     /** Monday of the week containing [date]. */
     fun weekStart(date: LocalDate): LocalDate = date.minusDays((date.dayOfWeek.value - 1).toLong())
+
+    /**
+     * Weekly-quota outlook for an `x/week` habit on [date]: how many completions are still needed
+     * and how many days (incl. today) are left in the week. [remaining] ≥ [daysLeft] means every
+     * remaining day is a must; `remaining > daysLeft` means the week is already lost.
+     */
+    data class WeekOutlook(val done: Int, val quota: Int, val daysLeft: Int) {
+        val remaining: Int get() = (quota - done).coerceAtLeast(0)
+        val met: Boolean get() = remaining == 0
+        val lastChance: Boolean get() = !met && remaining == daysLeft
+        val lost: Boolean get() = !met && remaining > daysLeft
+        /** "2/3 · 4 days left", "2/3 · last chance today", "1/3 · 2 more, 2 days left", "3/3 ✓", "1/3 · week missed" */
+        val label: String
+            get() = when {
+                met -> "$done/$quota this week ✓"
+                lost -> "$done/$quota · week missed"
+                lastChance && daysLeft == 1 -> "$done/$quota · last chance today"
+                lastChance -> "$done/$quota · every day now ($daysLeft left)"
+                remaining == 1 -> "$done/$quota · 1 more, $daysLeft days left"
+                else -> "$done/$quota · $remaining more, $daysLeft days left"
+            }
+    }
+
+    fun weekOutlook(habit: Habit, weekCount: Int, date: LocalDate): WeekOutlook =
+        WeekOutlook(done = weekCount, quota = habit.timesPerWeek.coerceAtLeast(1), daysLeft = 7 - (date.dayOfWeek.value - 1))
 }

@@ -30,6 +30,11 @@ data class Settings(
     val backupIntervalHours: Int = 24,
     val lastBackupAt: Long = 0L,
     val lastBackupStatus: String = "",
+    /** Size / photo count of the last uploaded archive and when it was last verified (0 = never). */
+    val lastBackupBytes: Long = 0L,
+    val lastBackupMedia: Int = 0,
+    val lastVerifiedAt: Long = 0L,
+    val lastVerifiedStatus: String = "",
     val driveAccountEmail: String = "",
     val driveFolderId: String = "",
     val onboarded: Boolean = false,
@@ -108,9 +113,12 @@ data class NotificationPrefs(
     /** Weekly review ready – Sunday evening at [weeklyReviewMinutes]. */
     val weeklyReview: Boolean = false,
     val weeklyReviewMinutes: Int = 18 * 60,
+    /** One glanceable morning line (opt-in): habits today, watch suggestion, sleep, streaks at risk. */
+    val morningBriefing: Boolean = false,
+    val morningBriefingMinutes: Int = 7 * 60 + 30,
 ) {
     /** True when at least one *scheduled* (time-based) notification is on – used to arm the scheduler. */
-    val anyScheduled: Boolean get() = habitReminders || habitCheckIn || wearLog || streakRisk || weeklyReview
+    val anyScheduled: Boolean get() = habitReminders || habitCheckIn || wearLog || streakRisk || weeklyReview || morningBriefing
 }
 
 class UserPrefs(private val context: Context) {
@@ -127,6 +135,10 @@ class UserPrefs(private val context: Context) {
         val BACKUP_INTERVAL = intPreferencesKey("backup_interval")
         val LAST_BACKUP = longPreferencesKey("last_backup")
         val LAST_BACKUP_STATUS = stringPreferencesKey("last_backup_status")
+        val LAST_BACKUP_BYTES = longPreferencesKey("last_backup_bytes")
+        val LAST_BACKUP_MEDIA = intPreferencesKey("last_backup_media")
+        val LAST_VERIFIED = longPreferencesKey("last_verified")
+        val LAST_VERIFIED_STATUS = stringPreferencesKey("last_verified_status")
         val DRIVE_EMAIL = stringPreferencesKey("drive_email")
         val DRIVE_FOLDER = stringPreferencesKey("drive_folder")
         val ONBOARDED = booleanPreferencesKey("onboarded")
@@ -157,6 +169,8 @@ class UserPrefs(private val context: Context) {
         val N_STREAK_LEN = intPreferencesKey("n_streak_risk_len")
         val N_REVIEW = booleanPreferencesKey("n_weekly_review")
         val N_REVIEW_MIN = intPreferencesKey("n_weekly_review_min")
+        val N_BRIEFING = booleanPreferencesKey("n_morning_briefing")
+        val N_BRIEFING_MIN = intPreferencesKey("n_morning_briefing_min")
         val COMPACT_LIVE = booleanPreferencesKey("compact_live_update")
         val TODAY_SECTIONS = booleanPreferencesKey("today_sections")
     }
@@ -175,6 +189,10 @@ class UserPrefs(private val context: Context) {
             backupIntervalHours = p[Keys.BACKUP_INTERVAL] ?: 24,
             lastBackupAt = p[Keys.LAST_BACKUP] ?: 0L,
             lastBackupStatus = p[Keys.LAST_BACKUP_STATUS] ?: "",
+            lastBackupBytes = p[Keys.LAST_BACKUP_BYTES] ?: 0L,
+            lastBackupMedia = p[Keys.LAST_BACKUP_MEDIA] ?: 0,
+            lastVerifiedAt = p[Keys.LAST_VERIFIED] ?: 0L,
+            lastVerifiedStatus = p[Keys.LAST_VERIFIED_STATUS] ?: "",
             driveAccountEmail = p[Keys.DRIVE_EMAIL] ?: "",
             driveFolderId = p[Keys.DRIVE_FOLDER] ?: "",
             onboarded = p[Keys.ONBOARDED] ?: false,
@@ -206,6 +224,8 @@ class UserPrefs(private val context: Context) {
                 streakRiskMinStreak = p[Keys.N_STREAK_LEN] ?: 3,
                 weeklyReview = p[Keys.N_REVIEW] ?: false,
                 weeklyReviewMinutes = p[Keys.N_REVIEW_MIN] ?: (18 * 60),
+                morningBriefing = p[Keys.N_BRIEFING] ?: false,
+                morningBriefingMinutes = p[Keys.N_BRIEFING_MIN] ?: (7 * 60 + 30),
             ),
             compactLiveUpdate = p[Keys.COMPACT_LIVE] ?: true,
             todaySections = p[Keys.TODAY_SECTIONS] ?: false,
@@ -237,6 +257,8 @@ class UserPrefs(private val context: Context) {
         it[Keys.LAST_BACKUP] = at; it[Keys.LAST_BACKUP_STATUS] = status
     }
     suspend fun setBackupStatus(status: String) = context.dataStore.edit { it[Keys.LAST_BACKUP_STATUS] = status }
+    suspend fun setBackupStats(bytes: Long, media: Int) = context.dataStore.edit { it[Keys.LAST_BACKUP_BYTES] = bytes; it[Keys.LAST_BACKUP_MEDIA] = media }
+    suspend fun setBackupVerified(at: Long, status: String) = context.dataStore.edit { it[Keys.LAST_VERIFIED] = at; it[Keys.LAST_VERIFIED_STATUS] = status }
     suspend fun setDriveAccount(email: String, folderId: String) = context.dataStore.edit {
         it[Keys.DRIVE_EMAIL] = email; it[Keys.DRIVE_FOLDER] = folderId
     }
@@ -269,5 +291,6 @@ class UserPrefs(private val context: Context) {
         it[Keys.N_TIMER] = n.timerAlerts
         it[Keys.N_STREAK] = n.streakRisk; it[Keys.N_STREAK_MIN] = n.streakRiskMinutes; it[Keys.N_STREAK_LEN] = n.streakRiskMinStreak
         it[Keys.N_REVIEW] = n.weeklyReview; it[Keys.N_REVIEW_MIN] = n.weeklyReviewMinutes
+        it[Keys.N_BRIEFING] = n.morningBriefing; it[Keys.N_BRIEFING_MIN] = n.morningBriefingMinutes
     }
 }

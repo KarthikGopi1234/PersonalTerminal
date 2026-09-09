@@ -4,23 +4,26 @@ Candidate features that would be *genuinely useful* for a one-person habit + wat
 the polish items found while auditing every screen at 0.3.2. Ordered by value-for-effort.
 Effort: **S** = an evening, **M** = a weekend, **L** = multi-week.
 
+**Shipped in 0.3.4:** A1 sleep anchors, A2 pause-until, A3 repair window, A5 weekly-quota nudge,
+A8 strap swap log, A9 backup heartbeat + verify, A11 `stats <habit>`, A13 morning briefing.
+
 ## Features worth building
 
 | # | Idea | Why it earns its place | Effort |
 |---|------|------------------------|--------|
-| A1 | **Bedtime / wake anchors** – a `sleep 23:30` / `wake 06:45` pair logged from the prompt (or Health Connect sleep). Today's *morning* section opens with "slept 7h 15m"; the review correlates sleep with completion rate. | Sleep is the single biggest predictor of whether the rest of the day's habits happen; the correlation engine already exists. | M |
-| A2 | **Habit pause with a return date** (`pause run until 2026-10-01`) – different from insurance: the habit disappears from Today entirely and comes back by itself. | Injuries and busy months; avoids the temptation to archive and forget. | S |
-| A3 | **Streak repair window** – if yesterday was missed, Today shows `[ yesterday ]` for 12 h so it can be ticked late without spending a shield; after that a shield is needed. | Most "broken" streaks are forgotten logs, not missed habits. | S |
+| A1 ✓ | **Bedtime / wake anchors** – `sleep 23:30` / `wake 06:45` / `slept 23:30 06:45` from the prompt, a tap-to-edit line on Today, Health Connect sleep sessions fill the gaps (manual wins). Insights gets a *sleep* panel: average night and "you are 40% more likely to do X after 6h30+". | Sleep is the single biggest predictor of whether the rest of the day's habits happen; the correlation engine already exists. | M |
+| A2 ✓ | **Habit pause with a return date** – `pause run until 2026-10-01` / `pause run 2w` / `resume run`, or the *pause* panel in habit edit (1w · 2w · 1m · date). The habit leaves Today, the widget and reminders, the streak is bridged, and it returns by itself. | Injuries and busy months; avoids the temptation to archive and forget. | S |
+| A3 ✓ | **Streak repair window** – until 12:00 an unlogged previous scheduled day shows `[ did it yesterday ]` on the row (and `yesterday <habit>` at the prompt); it is ticked late with a "logged late" note, no shield spent. After noon the shield path takes over as before. | Most "broken" streaks are forgotten logs, not missed habits. | S |
 | A4 | **Numeric targets that ramp** (`read 10 → 30 pages over 6 weeks`) – the target increases weekly. | Progressive overload is how habits actually grow; a static target is either too easy in week 1 or too hard in week 6. | M |
-| A5 | **Weekly quota display for `x/week` habits** – "2/3 this week · 4 days left" inline, plus a "this can still be done" nudge on the last possible day. | Weekly habits are the ones that silently fail on Sunday night. | S |
+| A5 ✓ | **Weekly quota display for `x/week` habits** – the row now reads `1/3 · 2 more, 4 days left`, turns yellow at `last chance today` / `every day now (2 left)` and red at `week missed`; the evening streak-risk notice includes last-chance quotas. | Weekly habits are the ones that silently fail on Sunday night. | S |
 | A6 | **Wear-photo contact sheet** – `watch shots speedy` renders a month of wrist shots as a monospace-captioned grid PNG for sharing. | The photo log is the most personal data in the app and there is no way to look at it in bulk. | M |
 | A7 | **Water resistance / service warnings on the wear log** – a small `⚠ service overdue` / `⚠ not for swimming` badge next to the watch when logging. | The service log exists; surfacing it at the moment of choice is what makes it useful. | S |
-| A8 | **Strap swap log** – `strap speedy → bond nato` records the change; the wear log inherits the strap; the strap page shows "on speedy for 23 days". | Straps are half the hobby; today the strap↔watch link is a single mutable field. | S |
-| A9 | **Backup health line on the profile** – "last backup 3 h ago · 1.2 MB · 214 photos" with a `[ verify ]` that decrypts and checks the archive. | Backups fail silently; a visible heartbeat is the cheapest insurance. | S |
+| A8 ✓ | **Strap swap log** – `strap bond nato speedy` / `strap bond nato drawer` (or the fit row on the straps page) appends to a `strap_swaps` table; today's wear entry inherits the strap; the straps page shows `on speedy · 23d` and a swap log panel. | Straps are half the hobby; today the strap↔watch link is a single mutable field. | S |
+| A9 ✓ | **Backup health line on the profile** – `last backup 3 h ago · 1.2 MB · 214 photos` (red when older than 2× the interval), last-verified line, `[ self-check ]` writes + reads back an archive locally; settings › drive gets `[ verify ]`, which downloads the newest archive and dry-runs a restore (decrypt, parse, photo audit) without touching the database. | Backups fail silently; a visible heartbeat is the cheapest insurance. | S |
 | A10 | **Data export as SQLite** (`export db`) alongside CSV. | One file, every table, opens in DB Browser; the app already owns the Room file. | S |
-| A11 | **`stats <habit>` command** – prints the habit's 30/90/365-day rates, best weekday, and current vs best streak as a monospace block. | Keeps the terminal promise: everything the screens show should be askable. | S |
+| A11 ✓ | **`stats <habit>` command** – 30/90/365-day bars, streak/best/shields, best weekday, totals/averages, skips & notes, repair hint; bare `stats` lists every habit's 30-day rate. | Keeps the terminal promise: everything the screens show should be askable. | S |
 | A12 | **Voice / quick-tile "done" for the next due habit** – a QS tile that ticks the top undone habit and shows its name. | The timer tile proved the pattern; this covers the 90 % case with zero taps into the app. | S |
-| A13 | **Morning briefing notification** (opt-in, one per day) – "3 habits · 2 in the morning · wear: 62MAS (14 d) · streak at risk: journal". | Replaces several nudges with one glanceable line. | M |
+| A13 ✓ | **Morning briefing notification** (opt-in, settings › notifications, default 07:30) – `3 habits · 2 this morning · slept 7h 15m · wear: 62MAS · streak at risk: journal · last chance: workout`, expanded body lists each item. | Replaces several nudges with one glanceable line. | M |
 | A14 | **Habit dependencies** (`journal` after `meditate`) – the dependent habit is dimmed until its parent is done, then highlighted. | Habit stacking is the technique; the UI can enforce the order gently. | M |
 | A15 | **Local on-device widgets for the vault** – a 2×2 widget showing today's watch photo and a `next: Cartier (14 d)` line. | The watch side has no widget yet. | M |
 

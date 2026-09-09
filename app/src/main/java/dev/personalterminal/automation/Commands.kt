@@ -5,6 +5,10 @@ import android.content.Context
 import dev.personalterminal.PersonalTerminalApp
 import dev.personalterminal.data.db.Habit
 import dev.personalterminal.data.db.HabitType
+import dev.personalterminal.domain.HabitStats
+import dev.personalterminal.domain.Schedule
+import dev.personalterminal.domain.Sleep
+import dev.personalterminal.data.db.isPausedOn
 import dev.personalterminal.data.db.checklistItems
 import dev.personalterminal.data.db.hasItem
 import dev.personalterminal.data.db.Watch
@@ -26,6 +30,11 @@ import java.time.LocalDate
  * timer stop | pause | resume
  * wear <watch>              log today's watch          watch next          rotation suggestion
  * shield <habit>            repair the latest gap      habit add [template]
+ * yesterday <habit>         late-log the previous day (repair window, before 12:00)
+ * pause <habit> [until d|2w] hide until a date       resume <habit>      bring it back early
+ * sleep 23:30 / wake 06:45  sleep anchors (night → wake day)   slept 23:30 06:45  both at once
+ * strap <strap> <watch>     fit a strap (logged as a swap)     strap <strap> drawer  take it off
+ * stats [habit]             30/90/365-day rates, best weekday, streaks as a monospace block
  * ls | status | review | help | theme <name> | goto <route>
  * ```
  */
@@ -46,6 +55,77 @@ object Commands {
                 if (h.negative) { app.habits.logSlip(h.id, slipped = false, date = date); ok("[✓] ${h.name} — clean today") }
                 else if (st?.completed == true) ok("[✓] ${h.name} already done · use `undo ${h.name}`")
                 else { app.habits.toggle(h.id, date); if (comment.isNotBlank()) app.habits.annotate(h.id, date, note = comment); ok("[✓] ${h.name} done" + xpHint()) }
+            } ?: noHabit(rest)
+            "yesterday", "yday", "late" -> habit(app, rest)?.let { h ->
+                // repair window: `yesterday <habit>` ticks the previous scheduled day without spending a shield
+                val info = app.habits.streakFor(h.id, date)
+                val day = info?.lateLogDay
+                when {
+                    day != null -> { app.habits.logLate(h.id, day); ok("[✓] ${h.name} logged for ${day.dayOfWeek.name.lowercase().take(3)} ${day.dayOfMonth} · streak ${app.habits.streakFor(h.id, date)?.current ?: 0}d") }
+                    info?.repairableDay != null -> err("repair window closed · `shield ${h.name}` to bridge ${info.repairableDay}")
+                    else -> err("${h.name}: nothing to repair")
+                }
+            } ?: noHabit(rest)
+            "stats", "stat", "show" -> {
+                if (rest.isBlank()) {
+                    // no habit → one line per habit, 30-day rate
+                    val rows = app.habits.activeWithLogs().map { hwl ->
+                        val r = HabitStats.report(hwl.habit, hwl.logs, hwl.shields, date, AppClock.now().hour)
+                        val w = r.windows.first()
+                        "%-14s %3d%% ⚡%d".format(hwl.habit.name.take(14), (w.rate * 100).toInt(), r.streak.current)
+                    }
+                    if (rows.isEmpty()) err("no habits yet") else ok("30d rates\n" + rows.joinToString("\n") + "\n`stats <habit>` for the full block")
+                } else habit(app, rest)?.let { h ->
+                    val hwl = app.habits.activeWithLogs().firstOrNull { it.habit.id == h.id } ?: return err("${h.name} is archived")
+                    ok(HabitStats.render(HabitStats.report(h, hwl.logs, hwl.shields, date, AppClock.now().hour)))
+                } ?: noHabit(rest)
+            }
+            "sleep", "bed", "bedtime" -> {
+                // `sleep 23:30` (evening → tonight's night, logged on tomorrow) · `sleep` shows last night
+                val arg = rest.trim()
+                if (arg.isBlank() || arg == "status" || arg == "ls") {
+                    val log = app.habits.sleep(date)
+                    val stats = Sleep.stats(app.habits.sleepRange(date.minusDays(29), date))
+                    ok(listOfNotNull(Sleep.summary(log) ?: "no sleep logged for ${date} · `sleep 23:30` tonight, `wake 06:45` tomorrow", stats?.line).joinToString("\n"))
+                } else {
+                    val clock = Sleep.parseClock(arg) ?: return err("can't read '$arg' · try `sleep 23:30` or `sleep 11pm`")
+                    val wakeDay = if (date == AppClock.today()) Sleep.wakeDayForBedCommand(AppClock.now()) else date
+                    app.habits.logSleep(wakeDay, bedMinutes = Sleep.bedMinutesFor(clock), note = comment.ifBlank { null })
+                    ok("☾ bed ${Sleep.formatClock(clock)} · night of ${wakeDay.minusDays(1)} → `wake HH:MM` in the morning")
+                }
+            }
+            "wake", "woke", "up" -> {
+                val arg = rest.trim()
+                if (arg.isBlank()) return err("usage: wake 06:45")
+                val clock = Sleep.parseClock(arg) ?: return err("can't read '$arg' · try `wake 06:45`")
+                app.habits.logSleep(date, wakeMinutes = clock, note = comment.ifBlank { null })
+                val log = app.habits.sleep(date)
+                ok("☼ up ${Sleep.formatClock(clock)}" + (Sleep.durationMinutes(log)?.let { " · slept ${Sleep.formatDuration(it)}" } ?: " · `sleep HH:MM` to add the bedtime"))
+            }
+            "slept" -> {
+                // `slept 23:30 06:45` – both anchors for last night in one go
+                val parts = rest.trim().split(Regex("\\s+|\\s*(->|→|-)\\s*")).filter { it.isNotBlank() }
+                val bed = parts.getOrNull(0)?.let { Sleep.parseClock(it) }
+                val wake = parts.getOrNull(1)?.let { Sleep.parseClock(it) }
+                if (bed == null || wake == null) return err("usage: slept 23:30 06:45")
+                app.habits.logSleep(date, bedMinutes = Sleep.bedMinutesFor(bed), wakeMinutes = wake, note = comment.ifBlank { null })
+                ok(Sleep.summary(app.habits.sleep(date)) ?: "logged")
+            }
+            "pause" -> {
+                // `pause run until 2026-10-01` · `pause run 2w` · `pause run` (list / default 1w)
+                val m = Regex("^(.*?)\\s*(until\\s+\\S+|till\\s+\\S+|\\d+\\s*[dwm]|\\d{4}-\\d{2}-\\d{2})$", RegexOption.IGNORE_CASE).matchEntire(rest.trim())
+                val ref = m?.groupValues?.get(1)?.trim() ?: rest.trim()
+                val untilArg = m?.groupValues?.get(2) ?: "1w"
+                if (ref.isBlank()) {
+                    val paused = app.habits.allHabits().filter { !it.archived && it.isPausedOn(date) }
+                    ok(if (paused.isEmpty()) "nothing paused · pause <habit> [until yyyy-mm-dd | 2w | 10d | 1m]" else paused.joinToString("\n") { "‖ ${it.name} · ${Schedule.pauseLabel(it, date)}" })
+                } else habit(app, ref)?.let { h ->
+                    val until = Schedule.parseUntil(untilArg, date) ?: return err("can't read '$untilArg' · try `until 2026-10-01`, `2w`, `10d`, `1m`")
+                    app.habits.pauseHabit(h, until); ok("‖ ${h.name} paused → $until · `resume ${h.name}` to bring it back early")
+                } ?: noHabit(ref)
+            }
+            "resume", "unpause" -> habit(app, rest)?.let { h ->
+                if (!h.isPausedOn(date)) err("${h.name} isn't paused") else { app.habits.pauseHabit(h, null); ok("▶ ${h.name} back on the list") }
             } ?: noHabit(rest)
             "undo", "uncheck" -> habit(app, rest)?.let { h ->
                 if (h.type == HabitType.CHECKBOX && !h.negative) { if (status(app, h.id, date)?.completed == true) app.habits.toggle(h.id, date) }
@@ -101,6 +181,29 @@ object Commands {
             "wear", "w" -> {
                 if (rest.isBlank()) return ok("open wear log", Routes.wearLog(date.toEpochDay()))
                 watch(app, rest)?.let { w -> app.watches.logWear(w.id, date, note = comment); app.habits.mutations.value = System.currentTimeMillis(); ok("⌚ ${w.displayName} on the wrist today") } ?: err("no watch matches '$rest'")
+            }
+            "strap", "straps" -> {
+                // `strap` → straps page · `strap <strap> <watch>` fits it (logs a swap) · `strap <strap> drawer` · `strap <strap>` shows where it is
+                val arg = rest.trim()
+                if (arg.isBlank() || arg == "ls") return ok("straps", Routes.STRAPS)
+                val straps = app.watches.straps()
+                val words = arg.split(Regex("\\s+|\\s*(->|→|on)\\s+")).filter { it.isNotBlank() }
+                var match: Pair<dev.personalterminal.data.db.Strap, String>? = null
+                for (split in words.size downTo 1) {
+                    val ref = words.take(split).joinToString(" ")
+                    val st = straps.firstOrNull { it.name.equals(ref, true) } ?: straps.filter { it.name.contains(ref, true) }.takeIf { it.size == 1 }?.first()
+                    if (st != null) { match = st to words.drop(split).joinToString(" "); break }
+                }
+                val (strap, target) = match ?: return err("no strap matches '$arg' · `strap` lists them")
+                when {
+                    target.isBlank() -> {
+                        val on = strap.watchId?.let { id -> app.watches.allWatches().firstOrNull { it.id == id } }
+                        val days = app.watches.strapFittedDays(strap)
+                        ok(if (on == null) "${strap.name}: in the drawer" else "${strap.name}: on ${on.displayName}" + (days?.let { " for ${it}d" } ?: ""))
+                    }
+                    target.lowercase() in setOf("drawer", "off", "none") -> { app.watches.fitStrap(strap, null, date, comment); ok("${strap.name} → drawer") }
+                    else -> watch(app, target)?.let { w -> app.watches.fitStrap(strap, w.id, date, comment); ok("${strap.name} → ${w.displayName} · swap logged") } ?: err("no watch matches '$target'")
+                }
             }
             "watch" -> when (rest.trim().lowercase()) {
                 "next", "suggest" -> ok(app.watches.suggestNext()?.let { "watch next → ${it.first.displayName}: ${it.second}" } ?: "add a watch first", Routes.WATCHES)
@@ -299,9 +402,14 @@ object Commands {
         |timer [min] [habit]   stopwatch [habit]
         |timer stop|pause      wear <watch>
         |watch next · vault    shield <habit>
+        |yesterday <habit>     (late log, till 12:00)
+        |pause <habit> 2w      resume <habit>
+        |sleep 23:30 · wake 06:45 · slept 23:30 06:45
+        |strap <strap> <watch|drawer>   swap log
         |tick <habit> <item>   remind <habit> 07:30
         |away <why> [3d|dates] back
         |habit add [template]  ls · status
+        |stats [habit]         30/90/365d block
         |review [year] · achievements · insights
         |theme <name> · font <name> · icon <name>
     """.trimMargin()

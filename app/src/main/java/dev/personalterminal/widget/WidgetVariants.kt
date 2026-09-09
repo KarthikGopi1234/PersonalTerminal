@@ -5,6 +5,17 @@ import android.content.Context
 import android.content.res.Configuration
 import androidx.annotation.Keep
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import dev.personalterminal.domain.DaySummary
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -56,6 +67,7 @@ import java.time.LocalDate
 import kotlin.math.roundToInt
 
 /** Shared palette resolution for all widgets (follows the in-app theme, incl. custom palettes). */
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 internal object WidgetTheme {
     fun palette(context: Context, settings: Settings): TerminalPalette {
         val dark = when (settings.themeMode) {
@@ -70,6 +82,17 @@ internal object WidgetTheme {
         val f = (fraction.coerceIn(0f, 1f) * width).roundToInt()
         return "█".repeat(f) + "░".repeat(width - f)
     }
+
+    /**
+     * Today's summary as a live flow: re-emits on every habit / log / routine / xp change *and* when
+     * the calendar day rolls over (the widget session may live for days). Errors collapse to null so
+     * a broken row can never take the whole widget down.
+     */
+    fun liveSummary(app: PersonalTerminalApp): Flow<DaySummary?> =
+        app.habits.mutations.flatMapLatest { app.habits.observeDay(AppClock.today()) }
+            .map<DaySummary, DaySummary?> { it }
+            .catch { emit(null) }
+            .flowOn(Dispatchers.IO)
 }
 
 /**
@@ -82,12 +105,14 @@ class StreakWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val app = PersonalTerminalApp.get(context)
-        val settings = app.prefs.current()
-        val pal = WidgetTheme.palette(context, settings)
-        val summary = runCatching { app.habits.daySummary(AppClock.today()) }.getOrNull()
-        val top = summary?.all?.maxByOrNull { it.streak.current }
-        val progress = Progression.progress(summary?.totalXp ?: 0)
+        val initialSettings = app.prefs.current()
+        val initial = runCatching { app.habits.daySummary(AppClock.today()) }.getOrNull()
         provideContent {
+            val settings by app.prefs.settings.collectAsState(initial = initialSettings)
+            val summary by remember { WidgetTheme.liveSummary(app) }.collectAsState(initial = initial)
+            val pal = WidgetTheme.palette(context, settings)
+            val top = summary?.all?.maxByOrNull { it.streak.current }
+            val progress = Progression.progress(summary?.totalXp ?: 0)
             GlanceTheme {
                 currentState<Preferences>()
                 val size = LocalSize.current
@@ -124,10 +149,15 @@ class TimerWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val app = PersonalTerminalApp.get(context)
-        val settings = app.prefs.current()
-        val pal = WidgetTheme.palette(context, settings)
-        val state = PomodoroService.state.value
+        val initialSettings = app.prefs.current()
+        val initialState = PomodoroService.state.value // read outside composition (lint: StateFlowValueCalledInComposition)
         provideContent {
+            val settings by app.prefs.settings.collectAsState(initial = initialSettings)
+            // Coarse view of the timer: phase / running / minute, so the widget follows the service
+            // without re-rendering RemoteViews every second.
+            val state by remember { PomodoroService.state.map { it.copy(remainingSeconds = it.remainingSeconds / 60 * 60, elapsedSeconds = it.elapsedSeconds / 60 * 60, focusedSeconds = 0, endsAtMs = 0L) }.distinctUntilChanged() }
+                .collectAsState(initial = initialState)
+            val pal = WidgetTheme.palette(context, settings)
             GlanceTheme {
                 currentState<Preferences>()
                 Content(settings, pal, state)
@@ -211,9 +241,13 @@ class TimerWidgetAction : ActionCallback {
 @Keep
 class StreakWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = StreakWidget()
+    override fun onEnabled(context: Context) { super.onEnabled(context); armRollover(context) }
+    override fun onDisabled(context: Context) { super.onDisabled(context); armRollover(context) }
 }
 
 @Keep
 class TimerWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = TimerWidget()
+    override fun onEnabled(context: Context) { super.onEnabled(context); armRollover(context) }
+    override fun onDisabled(context: Context) { super.onDisabled(context); armRollover(context) }
 }

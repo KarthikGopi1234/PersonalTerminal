@@ -1,6 +1,8 @@
 package dev.personalterminal.ui.today
 
 import dev.personalterminal.domain.AppClock
+import dev.personalterminal.domain.Streaks
+import dev.personalterminal.domain.Sleep
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -40,6 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import dev.personalterminal.PersonalTerminalApp
 import dev.personalterminal.data.db.HabitType
+import dev.personalterminal.data.db.isPausedOn
 import dev.personalterminal.data.db.ScheduleType
 import dev.personalterminal.domain.DaySummary
 import dev.personalterminal.domain.HabitStatus
@@ -76,6 +79,7 @@ fun TodayScreen(app: PersonalTerminalApp, nav: NavHostController) {
     val summary by remember { snapshotFlow { date }.flatMapLatest { app.habits.observeDay(it) } }
         .collectAsStateWithLifecycle(initialValue = null)
     val wearToday by remember(date) { app.watches.observeWearForDay(date) }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val sleepLog by remember(date) { app.habits.observeSleep(date) }.collectAsStateWithLifecycle(initialValue = null)
     val settings by app.prefs.settings.collectAsStateWithLifecycle(initialValue = dev.personalterminal.data.prefs.Settings())
 
     val isToday = date == AppClock.today()
@@ -184,14 +188,51 @@ fun TodayScreen(app: PersonalTerminalApp, nav: NavHostController) {
                     onSkip = { reason -> scope.launch { app.habits.skip(hs.habit.id, reason, date); expanded = null } },
                     onUnskip = { scope.launch { app.habits.unskip(hs.habit.id, date) } },
                     onAnnotate = { note, mood -> scope.launch { app.habits.annotate(hs.habit.id, date, note = note, mood = mood) } },
+                    onLateLog = { day -> scope.launch { app.habits.logLate(hs.habit.id, day) } },
+                    isToday = isToday,
                 )
             }
             if (offDay.isNotEmpty()) {
                 item(key = "off-${group.key}") {
-                    Text(
-                        "  # not scheduled today: " + offDay.joinToString(", ") { it.habit.name },
-                        color = p.fgDim, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    )
+                    val (paused, unscheduled) = offDay.partition { it.habit.isPausedOn(date) }
+                    Column {
+                        if (unscheduled.isNotEmpty()) Text(
+                            "  # not scheduled today: " + unscheduled.joinToString(", ") { it.habit.name },
+                            color = p.fgDim, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        )
+                        if (paused.isNotEmpty()) Text(
+                            "  # paused: " + paused.joinToString(", ") { "${it.habit.name} → ${LocalDate.ofEpochDay(it.habit.pausedUntil).format(DateTimeFormatter.ofPattern("dd MMM")).lowercase()}" },
+                            color = p.fgDim, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+
+        // Sleep anchors – one quiet line; expands into the log-a-time row when tapped
+        item(key = "sleep") {
+            var open by remember { mutableStateOf(false) }
+            val text = Sleep.summary(sleepLog)
+            Column(Modifier.fillMaxWidth().clickable { open = !open }.padding(horizontal = 4.dp, vertical = 2.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (text != null) "☾ " else "☾ ", color = p.purple, style = MaterialTheme.typography.bodySmall)
+                    Text(text ?: "# sleep not logged · `sleep 23:30` tonight, `wake 06:45` in the morning", color = if (text != null) p.fg else p.fgDim,
+                        style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    if (sleepLog?.source == dev.personalterminal.data.db.SleepLog.SOURCE_HEALTH) Tag("health", p.purple)
+                }
+                if (open) {
+                    var bed by remember(sleepLog) { mutableStateOf(sleepLog?.bedMinutes?.let { Sleep.formatClock(it) } ?: "") }
+                    var wake by remember(sleepLog) { mutableStateOf(sleepLog?.wakeMinutes?.let { Sleep.formatClock(it) } ?: "") }
+                    Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        TermTextField(value = bed, onValueChange = { bed = it.take(7) }, placeholder = "23:30", keyboardType = androidx.compose.ui.text.input.KeyboardType.Number, modifier = Modifier.weight(1f), prompt = "bed ", imeAction = ImeAction.Next)
+                        TermTextField(value = wake, onValueChange = { wake = it.take(7) }, placeholder = "06:45", keyboardType = androidx.compose.ui.text.input.KeyboardType.Number, modifier = Modifier.weight(1f), prompt = "up ", imeAction = ImeAction.Done)
+                        val b = Sleep.parseClock(bed); val w = Sleep.parseClock(wake)
+                        TermButton("log", color = p.purple, enabled = b != null || w != null, onClick = {
+                            scope.launch { app.habits.logSleep(date, bedMinutes = b?.let { Sleep.bedMinutesFor(it) }, wakeMinutes = w); open = false }
+                        })
+                        if (sleepLog != null) TermButton("rm", color = p.red, onClick = { scope.launch { app.habits.clearSleep(date); open = false } })
+                    }
+                    Comment("the night before ${date.format(DateTimeFormatter.ofPattern("EEE dd"))} · insights compares habits after short vs full nights")
                 }
             }
         }
@@ -271,6 +312,8 @@ fun HabitRow(
     onSkip: (String) -> Unit = {},
     onUnskip: () -> Unit = {},
     onAnnotate: (String?, Int?) -> Unit = { _, _ -> },
+    onLateLog: (LocalDate) -> Unit = {},
+    isToday: Boolean = true,
 ) {
     val p = Term.palette
     val color = p.named(hs.habit.color)
@@ -301,13 +344,20 @@ fun HabitRow(
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (hs.streak.current > 0) Text("⚡${hs.streak.current}", color = p.orange, style = MaterialTheme.typography.labelSmall)
                     if (hs.streak.shieldedDays > 0) Text("⛨${hs.streak.shieldedDays}", color = p.cyan, style = MaterialTheme.typography.labelSmall)
+                    val outlook = if (h.schedule == ScheduleType.WEEKLY) Schedule.weekOutlook(h, hs.weekCount, AppClock.today()) else null
                     val sched = when {
                         hs.skipped -> "skipped" + (hs.log?.skipReason?.takeIf { it.isNotBlank() }?.let { ": $it" } ?: "")
                         h.negative -> if (hs.slipped) "slipped today" else "avoid · clean so far"
-                        h.schedule == ScheduleType.WEEKLY -> "${hs.weekCount}/${h.timesPerWeek} this week"
+                        outlook != null -> outlook.label
                         else -> Schedule.describe(h)
                     }
-                    Text(sched, color = p.fgDim, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val schedColor = when {
+                        outlook == null || hs.skipped || hs.completed -> p.fgDim
+                        outlook.lost -> p.red
+                        outlook.lastChance -> p.yellow
+                        else -> p.fgDim
+                    }
+                    Text(sched, color = schedColor, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (hs.mood > 0) Text("★".repeat(hs.mood), color = p.yellow, style = MaterialTheme.typography.labelSmall)
                     if (hs.note.isNotBlank()) Text("✎", color = p.cyan, style = MaterialTheme.typography.labelSmall)
                     if (h.reminderMinutes >= 0) Text("⏰", color = p.fgDim, style = MaterialTheme.typography.labelSmall)
@@ -345,8 +395,16 @@ fun HabitRow(
             Spacer(Modifier.height(4.dp))
             AsciiProgress(fraction = hs.fraction, width = 20, color = color, showPercent = true, label = h.unit.ifBlank { null })
         }
+        val late = hs.streak.lateLogDay
         val repair = hs.streak.repairableDay
-        if (repair != null && shieldsAvailable > 0) {
+        if (late != null && isToday) {
+            // repair window: the previous scheduled day was never logged → tick it late, no shield spent
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${late.format(DateTimeFormatter.ofPattern("EEE"))} not logged · until ${Streaks.LATE_LOG_CUTOFF_HOUR}:00", color = p.yellow, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+                TermButton("did it ${if (late == AppClock.today().minusDays(1)) "yesterday" else late.format(DateTimeFormatter.ofPattern("EEE"))}", onClick = { onLateLog(late) }, color = p.yellow)
+            }
+        } else if (repair != null && shieldsAvailable > 0) {
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("streak broke on ${repair.format(DateTimeFormatter.ofPattern("EEE dd"))}", color = p.red, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))

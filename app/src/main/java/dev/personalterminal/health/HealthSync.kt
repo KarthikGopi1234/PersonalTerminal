@@ -54,14 +54,15 @@ object HealthSync {
     suspend fun grantedPermissions(context: Context): Set<String> =
         client(context)?.let { runCatching { it.permissionController.getGrantedPermissions() }.getOrDefault(emptySet()) } ?: emptySet()
 
-    /** Pulls today's values for every linked habit. Returns a short log line per habit. */
+    /** Pulls today's values for every linked habit (and last night's sleep anchors). Returns a short log line per item. */
     suspend fun syncNow(context: Context, date: LocalDate = AppClock.today()): List<String> {
         val app = PersonalTerminalApp.get(context)
         if (!app.prefs.current().healthConnect) return emptyList()
         val hc = client(context) ?: return listOf("health connect not available")
         val granted = runCatching { hc.permissionController.getGrantedPermissions() }.getOrDefault(emptySet())
+        val sleepLine = if (HealthMetric.SLEEP.permission in granted) runCatching { syncSleepAnchors(app, hc, date) }.getOrNull() else null
         val linked = app.habits.allHabits().filter { !it.archived && it.healthMetric.isNotBlank() }
-        if (linked.isEmpty()) return emptyList()
+        if (linked.isEmpty()) return listOfNotNull(sleepLine)
         val zone = ZoneId.systemDefault()
         val start = date.atStartOfDay(zone).toInstant()
         val end = date.plusDays(1).atStartOfDay(zone).toInstant()
@@ -93,7 +94,30 @@ object HealthSync {
                 out += "${h.name}: $value ${h.unit}".trim()
             }
         }
+        sleepLine?.let { out += it }
         return out
+    }
+
+    /**
+     * Sleep anchors from Health Connect: the main sleep session that ended on [date] (the night
+     * before) becomes bed/wake minutes on the day's [dev.personalterminal.data.db.SleepLog]. Manual
+     * entries are never overwritten.
+     */
+    private suspend fun syncSleepAnchors(app: PersonalTerminalApp, hc: HealthConnectClient, date: LocalDate): String? {
+        val zone = ZoneId.systemDefault()
+        val dayStart = date.atStartOfDay(zone).toInstant()
+        val wide = TimeRangeFilter.between(date.minusDays(1).atStartOfDay(zone).toInstant(), date.plusDays(1).atStartOfDay(zone).toInstant())
+        val sessions = hc.readRecords(ReadRecordsRequest(SleepSessionRecord::class, wide)).records
+            .filter { !it.endTime.isBefore(dayStart) && it.startTime.isBefore(dayStart.plusSeconds(12 * 3600)) }
+        if (sessions.isEmpty()) return null
+        val start = sessions.minOf { it.startTime }
+        val end = sessions.maxOf { it.endTime }
+        val midnight = date.atStartOfDay(zone).toInstant()
+        val bed = (Duration.between(midnight, start).toMinutes()).toInt()
+        val wake = (Duration.between(midnight, end).toMinutes()).toInt()
+        if (wake <= bed || wake - bed > 20 * 60) return null
+        app.habits.logSleep(date, bedMinutes = bed, wakeMinutes = wake, source = dev.personalterminal.data.db.SleepLog.SOURCE_HEALTH)
+        return "sleep: ${dev.personalterminal.domain.Sleep.formatClock(bed)} → ${dev.personalterminal.domain.Sleep.formatClock(wake)}"
     }
 
     fun schedule(context: Context, enabled: Boolean) {

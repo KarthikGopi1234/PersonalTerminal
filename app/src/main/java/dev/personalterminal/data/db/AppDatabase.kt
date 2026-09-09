@@ -20,9 +20,9 @@ class Converters {
 @Database(
     entities = [
         Routine::class, Habit::class, HabitLog::class, ShieldUse::class, Watch::class, WearLog::class, XpEvent::class,
-        FocusSession::class, WatchService::class, AccuracyReading::class, Strap::class, SkipRule::class,
+        FocusSession::class, WatchService::class, AccuracyReading::class, Strap::class, SkipRule::class, SleepLog::class, StrapSwap::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -39,9 +39,13 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun accuracyDao(): AccuracyDao
     abstract fun strapDao(): StrapDao
     abstract fun skipRuleDao(): SkipRuleDao
+    abstract fun sleepDao(): SleepDao
+    abstract fun strapSwapDao(): StrapSwapDao
 
     /** Wipes every table inside one transaction (used when restoring a backup). */
     suspend fun clearAllData() = withTransaction {
+        strapSwapDao().deleteAll()
+        sleepDao().deleteAll()
         skipRuleDao().deleteAll()
         focusSessionDao().deleteAll()
         watchServiceDao().deleteAll()
@@ -63,10 +67,30 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun get(context: Context): AppDatabase = INSTANCE ?: synchronized(this) {
             INSTANCE ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
                 .also { INSTANCE = it }
+        }
+
+        /** 0.3.3 → 0.3.4: habit pause with a return date, sleep anchors, strap swap log. Additive only. */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE habits ADD COLUMN pausedUntil INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE habits ADD COLUMN pausedFrom INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS sleep_logs (day INTEGER NOT NULL, bedMinutes INTEGER, wakeMinutes INTEGER, " +
+                        "source TEXT NOT NULL, note TEXT NOT NULL, updatedAt INTEGER NOT NULL, PRIMARY KEY(day))",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS strap_swaps (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, strapId INTEGER NOT NULL, " +
+                        "watchId INTEGER, day INTEGER NOT NULL, note TEXT NOT NULL, createdAt INTEGER NOT NULL)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_strap_swaps_strapId ON strap_swaps (strapId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_strap_swaps_watchId ON strap_swaps (watchId)")
+                // seed the log from the current fits so "on <watch> since" has a starting point
+                db.execSQL("INSERT INTO strap_swaps (strapId, watchId, day, note, createdAt) SELECT id, watchId, CAST(strftime('%s','now') / 86400 AS INTEGER), 'existing fit', CAST(strftime('%s','now') AS INTEGER) * 1000 FROM straps WHERE watchId IS NOT NULL")
+            }
         }
 
         /**

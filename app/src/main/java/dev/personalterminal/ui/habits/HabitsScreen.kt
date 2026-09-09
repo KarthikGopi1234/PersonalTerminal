@@ -97,6 +97,7 @@ fun HabitsScreen(app: PersonalTerminalApp, nav: NavHostController) {
                         Text(h.name, color = p.fg, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Tag(Schedule.describe(h))
+                            Schedule.pauseLabel(h, AppClock.today())?.let { Tag(it, p.yellow) }
                             if (h.type != HabitType.CHECKBOX) Tag("${h.target} ${h.unit}".trim(), color)
                             if (hs.streak.current > 0) Tag("⚡${hs.streak.current}", p.orange)
                             if (hs.streak.best > 0) Tag("best ${hs.streak.best}", p.fgDim)

@@ -1,3 +1,4 @@
+import java.awt.Color
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
 import java.io.File
@@ -308,8 +309,12 @@ tasks.register("screenshots") {
             val scale = minOf(1.0, 2000.0 / fullW) // README-sized, keeps the repo lean
             val w = (fullW * scale).toInt()
             val h = (fullH * scale).toInt()
-            val out = BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
+            // Opaque, filled with the first screen's background so the gaps read as one terminal banner
+            // instead of transparent slots on GitHub's light and dark pages.
+            val out = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
             val g = out.createGraphics()
+            g.color = Color(images.first().getRGB(2, 2))
+            g.fillRect(0, 0, w, h)
             g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC)
             var x = 0.0
             images.forEach {

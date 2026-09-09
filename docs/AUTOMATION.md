@@ -17,6 +17,12 @@ tick <habit> <item|n>     tick / untick a checklist item (habit completes when a
 wear <watch>              log today's watch            watch next           rotation suggestion
 watch vault               collection grid by neglect   watch stats          collection stats
 shield <habit>            repair the latest gap        habit add [template] new habit / from template
+yesterday <habit>         late-log the previous scheduled day (repair window: before 12:00, no shield spent)
+pause <habit> [until yyyy-mm-dd | 2w | 10d | 1m]      hide a habit until a date (streak bridged)
+pause                     list paused habits           resume <habit>       bring it back early
+sleep 23:30 · wake 06:45  sleep anchors for the night  slept 23:30 06:45    both at once · `sleep` shows stats
+stats [habit]             30/90/365-day block (bare `stats` = one line per habit)
+strap <strap> <watch>     fit a strap (logged as a swap) strap <strap> drawer take it off · strap <strap> where is it
 remind <habit> 07:30      set / `off` the reminder     remind <habit> checkin on|off   evening check-in
 remind                    list reminders
 away <reason> [3d | yyyy-mm-dd [yyyy-mm-dd]]           streak insurance: auto-skip a date range

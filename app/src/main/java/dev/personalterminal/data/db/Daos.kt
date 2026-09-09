@@ -425,3 +425,60 @@ interface StrapDao {
     @Query("DELETE FROM straps")
     suspend fun deleteAll()
 }
+
+@Dao
+interface SleepDao {
+    @Query("SELECT * FROM sleep_logs WHERE day = :day")
+    fun observe(day: Long): Flow<SleepLog?>
+
+    @Query("SELECT * FROM sleep_logs WHERE day BETWEEN :from AND :to ORDER BY day")
+    fun observeRange(from: Long, to: Long): Flow<List<SleepLog>>
+
+    @Query("SELECT * FROM sleep_logs WHERE day = :day")
+    suspend fun get(day: Long): SleepLog?
+
+    @Query("SELECT * FROM sleep_logs WHERE day BETWEEN :from AND :to ORDER BY day")
+    suspend fun getRange(from: Long, to: Long): List<SleepLog>
+
+    @Query("SELECT * FROM sleep_logs ORDER BY day")
+    suspend fun getAll(): List<SleepLog>
+
+    @Upsert
+    suspend fun upsert(log: SleepLog)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(logs: List<SleepLog>)
+
+    @Query("DELETE FROM sleep_logs WHERE day = :day")
+    suspend fun delete(day: Long)
+
+    @Query("DELETE FROM sleep_logs")
+    suspend fun deleteAll()
+}
+
+@Dao
+interface StrapSwapDao {
+    @Query("SELECT * FROM strap_swaps ORDER BY day DESC, id DESC LIMIT :limit")
+    fun observeRecent(limit: Int): Flow<List<StrapSwap>>
+
+    @Query("SELECT * FROM strap_swaps WHERE strapId = :strapId ORDER BY day DESC, id DESC")
+    suspend fun getForStrap(strapId: Long): List<StrapSwap>
+
+    @Query("SELECT * FROM strap_swaps WHERE strapId = :strapId ORDER BY day DESC, id DESC LIMIT 1")
+    suspend fun latestForStrap(strapId: Long): StrapSwap?
+
+    @Query("SELECT * FROM strap_swaps ORDER BY day, id")
+    suspend fun getAll(): List<StrapSwap>
+
+    @Insert
+    suspend fun insert(swap: StrapSwap): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(swaps: List<StrapSwap>)
+
+    @Query("DELETE FROM strap_swaps WHERE strapId = :strapId")
+    suspend fun deleteForStrap(strapId: Long)
+
+    @Query("DELETE FROM strap_swaps")
+    suspend fun deleteAll()
+}

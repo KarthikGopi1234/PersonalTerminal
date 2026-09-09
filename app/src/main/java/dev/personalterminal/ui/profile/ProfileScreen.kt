@@ -18,6 +18,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -115,6 +119,45 @@ fun ProfileScreen(app: PersonalTerminalApp, nav: NavHostController) {
             KeyValue("watches", "${watches.size}")
             KeyValue("habits", "${habits.count { !it.archived }} active · ${habits.count { it.archived }} archived")
             if (focusTotal > 0) KeyValue("focus logged", "${focusTotal / 60}h ${focusTotal % 60}m", valueColor = p.orange)
+        }
+
+        // Backup heartbeat: one line that answers "is my data safe?" – age, size, photos, last verification.
+        TerminalPanel(title = "backup", titleColor = p.yellow, onClick = { nav.navigate(Routes.SETTINGS) }) {
+            val scope = androidx.compose.runtime.rememberCoroutineScope()
+            var checking by remember { mutableStateOf(false) }
+            var selfCheck by remember { mutableStateOf<String?>(null) }
+            val linked = settings.driveAccountEmail.isNotBlank()
+            val ageMs = System.currentTimeMillis() - settings.lastBackupAt
+            val stale = settings.lastBackupAt == 0L || ageMs > (settings.backupIntervalHours.coerceAtLeast(6) * 2L) * 3_600_000L
+            val line = when {
+                !linked -> "drive not linked · local exports only"
+                settings.lastBackupAt == 0L -> "no backup yet"
+                else -> "last backup ${dev.personalterminal.domain.Sleep.ago(ageMs)}" +
+                    (if (settings.lastBackupBytes > 0) " · ${"%.1f".format(settings.lastBackupBytes / 1_048_576.0)} MB" else "") +
+                    (if (settings.lastBackupMedia > 0) " · ${settings.lastBackupMedia} photos" else "")
+            }
+            Text(line, color = if (!linked) p.fgDim else if (stale) p.red else p.fg, style = MaterialTheme.typography.bodyMedium)
+            if (linked) {
+                val v = settings.lastVerifiedStatus
+                Text(
+                    if (settings.lastVerifiedAt == 0L) "never verified · settings › verify downloads the newest archive and dry-runs a restore"
+                    else "verified ${dev.personalterminal.domain.Sleep.ago(System.currentTimeMillis() - settings.lastVerifiedAt)} · ${v.substringBefore(" · ").take(48)}",
+                    color = if (v.startsWith("ok")) p.green else if (v.startsWith("warn")) p.yellow else if (v.startsWith("error")) p.red else p.fgDim,
+                    style = MaterialTheme.typography.labelSmall, maxLines = 2,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                TermButton(if (checking) "checking…" else "self-check", color = p.cyan, enabled = !checking, onClick = {
+                    scope.launch {
+                        checking = true
+                        selfCheck = runCatching { app.backups.selfCheck() }.fold({ "archive ok · ${it.summary} · ${it.bytes / 1024} KB" }, { "self-check failed: ${it.message}" })
+                        checking = false
+                    }
+                })
+                selfCheck?.let { Text(it, color = if (it.startsWith("archive ok")) p.green else p.red, style = MaterialTheme.typography.labelSmall, maxLines = 2, modifier = Modifier.weight(1f)) }
+            }
+            Comment("self-check writes an archive of the current data and reads it back – no upload")
         }
 
         TerminalPanel(title = "insights", titleColor = p.purple) {
