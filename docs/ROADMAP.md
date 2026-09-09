@@ -58,6 +58,10 @@ have been removed rather than left open.
 | 3.7 ✅ | **Purchase details & valuation**: price paid, date, box/papers, current estimate; collection total on the profile | Insurance / resale bookkeeping | S |
 | 3.8 ✅ | **Import / export CSV** of the collection and wear log | Data portability | S |
 | 3.10 ✅ | **Strap swap log** (0.3.4): every fit / removal is recorded (`strap bond nato speedy`), today's wear entry inherits the strap, straps show `on speedy · 23d` and a swap-log panel | Straps are half the hobby | S |
+| 3.11 ✅ | **Watch lifecycle** (0.3.6): status owned → in repair → sold; `watch repair speedy` parks it (out of `watch next`, the challenges and the wear notice) and `watch back speedy 320` books the invoice; `watch sold khaki 650` keeps every log and photo but moves the watch to a sold ledger with the realised gain | Collections change; archiving a sold watch threw away the money story | M |
+| 3.12 ✅ | **Wishlist** (0.3.6): `wish Tudor BB58 5200` adds a watch with a target price and link, `save 200 BB58` grows the fund (`62% funded` on the profile), `watch buy BB58` converts it into an owned watch carrying the price | Every collector has one; the fund makes it a habit | M |
+| 3.13 ✅ | **`uptime`** (0.3.6): power reserve + complications per watch; `uptime` prints `speedy  stopped ~2 d ago  wind · set time · set date`, low-reserve warnings, a "check date" nudge after 30-day months and February, moon age for moon-phase dials, a wind-and-set checklist on the watch page, and the morning briefing flags a stopped suggestion | Nobody does this as a first-class feature and it is genuinely useful | S/M |
+| 3.14 ✅ | **Rotation challenges** (0.3.6): every watch this month `3/4`, no repeats this week, dust off the most neglected piece, balanced quarter (top watch ≤ 50 %) – a panel on the watches page, `watch challenges` at the prompt | Turns `watch next` into a small game | S |
 | 3.9 | **Wrist-shot camera frame**: rule-of-thirds overlay, EXIF stamp with watch name, optional auto-crop to the dial | Better photos with zero effort | M |
 
 ## 4. Insights & gamification

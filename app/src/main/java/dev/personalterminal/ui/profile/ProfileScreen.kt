@@ -30,6 +30,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import dev.personalterminal.PersonalTerminalApp
+import dev.personalterminal.data.db.displayName
+import dev.personalterminal.data.db.sold
+import dev.personalterminal.data.db.wished
 import dev.personalterminal.data.prefs.Settings
 import dev.personalterminal.domain.Progression
 import dev.personalterminal.domain.Strength
@@ -138,7 +141,12 @@ fun ProfileScreen(app: PersonalTerminalApp, nav: NavHostController) {
 
         val focusTotal by remember { app.habits.observeTotalFocusMinutes() }.collectAsStateWithLifecycle(initialValue = 0)
         TerminalPanel(title = "collection", titleColor = p.cyan) {
-            KeyValue("watches", "${watches.size}")
+            val lifecycle by remember { app.watches.observeAllWatches() }.collectAsStateWithLifecycle(initialValue = emptyList())
+            val wish = lifecycle.count { it.wished }; val soldN = lifecycle.count { it.sold }
+            KeyValue("watches", "${watches.size}" + listOfNotNull(wish.takeIf { it > 0 }?.let { "$it wished" }, soldN.takeIf { it > 0 }?.let { "$it sold" }).takeIf { it.isNotEmpty() }?.joinToString(" · ", prefix = " · ").orEmpty())
+            lifecycle.filter { it.wished && (it.targetPrice ?: 0.0) > 0 }.maxByOrNull { it.savedSoFar / it.targetPrice!! }?.let { w ->
+                KeyValue("next", "${w.displayName} · ${((w.savedSoFar / w.targetPrice!!) * 100).toInt().coerceIn(0, 100)}% funded", valueColor = p.yellow)
+            }
             KeyValue("habits", "${habits.count { !it.archived }} active · ${habits.count { it.archived }} archived")
             if (focusTotal > 0) KeyValue("focus logged", "${focusTotal / 60}h ${focusTotal % 60}m", valueColor = p.orange)
         }

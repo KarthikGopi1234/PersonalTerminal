@@ -65,7 +65,7 @@ object ReminderScheduler {
         val settings = app.prefs.current()
         val wm = WorkManager.getInstance(context)
         val habits = app.habits.allHabits().filter { !it.archived }
-        val hasWatches = app.watches.allWatches().any { !it.archived }
+        val hasWatches = app.watches.ownedWatches().isNotEmpty()
         val now = AppClock.now()
         val next = if (!settings.remindersEnabled) null else nextSlot(habits, hasWatches, settings.notifications, now)
         if (next == null) { wm.cancelUniqueWork(WORK); return }
@@ -106,7 +106,7 @@ object ReminderScheduler {
         val s = app.prefs.current()
         if (!s.remindersEnabled) return null
         val habits = app.habits.allHabits().filter { !it.archived }
-        val hasWatches = app.watches.allWatches().any { !it.archived }
+        val hasWatches = app.watches.ownedWatches().isNotEmpty()
         val now = AppClock.now()
         val slot = nextSlot(habits, hasWatches, s.notifications, now) ?: return null
         val label = when (slot.kind) {
@@ -147,7 +147,7 @@ object ReminderScheduler {
 
         // 3. wear log – only when nothing is on the wrist yet
         if (n.wearLog && within(n.wearLogMinutes)) {
-            val watches = app.watches.allWatches().filter { !it.archived }
+            val watches = app.watches.ownedWatches()
             val loggedToday = app.watches.observeWearForDay(today).first().isNotEmpty()
             if (watches.isNotEmpty() && !loggedToday) {
                 val suggestion = runCatching { app.watches.suggestNext(today) }.getOrNull()

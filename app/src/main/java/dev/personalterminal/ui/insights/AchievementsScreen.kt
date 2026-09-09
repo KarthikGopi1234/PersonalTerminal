@@ -28,6 +28,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import dev.personalterminal.PersonalTerminalApp
+import dev.personalterminal.data.db.owned
+import dev.personalterminal.data.db.sold
 import dev.personalterminal.domain.Achievement
 import dev.personalterminal.domain.AchievementFacts
 import dev.personalterminal.domain.Achievements
@@ -49,7 +51,7 @@ fun AchievementsScreen(app: PersonalTerminalApp, nav: NavHostController) {
             xp = app.db.xpDao().total(),
             sessions = app.db.focusSessionDao().getAll(),
             wear = app.db.wearLogDao().getAll(),
-            watches = app.db.watchDao().getAll().count { !it.archived },
+            watches = app.db.watchDao().getAll().count { it.owned || it.sold },
         )
         list = Achievements.evaluate(facts)
     }

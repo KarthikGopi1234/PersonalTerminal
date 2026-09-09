@@ -36,7 +36,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import dev.personalterminal.PersonalTerminalApp
+import dev.personalterminal.data.db.Watch
 import dev.personalterminal.data.db.WearLog
+import dev.personalterminal.data.db.complicationSet
+import dev.personalterminal.data.db.inRepair
+import dev.personalterminal.data.db.owned
+import dev.personalterminal.data.db.sold
+import dev.personalterminal.domain.Uptime
 import dev.personalterminal.data.db.displayName
 import dev.personalterminal.ui.components.Comment
 import dev.personalterminal.ui.components.ContributionHeatmap
@@ -103,15 +109,36 @@ fun WatchDetailScreen(app: PersonalTerminalApp, nav: NavHostController, watchId:
                 KeyValue("wrist days", "${logs.size}", valueColor = color)
                 logs.firstOrNull()?.let { KeyValue("last worn", LocalDate.ofEpochDay(it.log.day).format(DateTimeFormatter.ofPattern("dd MMM yyyy"))) }
                 straps.firstOrNull { it.watchId == w.id }?.let { KeyValue("on strap", it.name, valueColor = p.cyan) }
+                when (w.status) {
+                    Watch.STATUS_REPAIR -> KeyValue("status", "in repair · since ${LocalDate.ofEpochDay(w.statusDay).format(DateTimeFormatter.ofPattern("dd MMM"))}", valueColor = p.orange)
+                    Watch.STATUS_SOLD -> KeyValue("status", "sold " + LocalDate.ofEpochDay(w.statusDay).format(DateTimeFormatter.ofPattern("dd MMM yyyy")), valueColor = p.red)
+                    Watch.STATUS_WISHLIST -> KeyValue("status", "☆ wishlist", valueColor = p.yellow)
+                }
+                // uptime: power reserve left / stopped, moon phase
+                if (w.owned && (w.powerReserveHours > 0 || "moonphase" in w.complicationSet)) {
+                    val up = Uptime.status(w, logs.firstOrNull()?.let { LocalDate.ofEpochDay(it.log.day) }, AppClock.now())
+                    KeyValue("uptime", up.label, valueColor = when (up.state) { Uptime.State.STOPPED -> p.red; Uptime.State.LOW -> p.yellow; Uptime.State.RUNNING -> p.green; else -> p.fgDim })
+                    up.moonAge?.let { KeyValue("moon", "${Uptime.moonGlyph(it)} ${Uptime.moonPhaseName(it)} · ${"%.1f".format(it)} d", valueColor = p.fgDim) }
+                }
             }
         }
         val wornToday = logs.any { it.log.day == today.toEpochDay() }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TermButton(if (wornToday) "[✓] worn today" else "wear today", filled = !wornToday, enabled = !wornToday, color = color, modifier = Modifier.weight(1f), onClick = {
+        if (w.owned) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TermButton(if (wornToday) "[✓] worn today" else "wear today", filled = !wornToday, enabled = !wornToday && !w.inRepair, color = color, modifier = Modifier.weight(1f), onClick = {
                 scope.launch { app.watches.logWear(w.id, today); status = "logged for today" }
             })
             TermButton("edit", color = p.fgDim, onClick = { nav.navigate(Routes.watchEdit(w.id)) })
         }
+        // wind-and-set checklist before the next wear (stopped / low reserve, skipped short months)
+        if (w.owned) {
+            val up = Uptime.status(w, logs.firstOrNull()?.let { LocalDate.ofEpochDay(it.log.day) }, AppClock.now())
+            if (up.checklist.isNotEmpty()) TerminalPanel(title = "before wearing", titleColor = if (up.state == Uptime.State.STOPPED) p.red else p.yellow) {
+                up.checklist.forEach { step -> Text("[ ] $step", color = p.fg, style = MaterialTheme.typography.bodySmall) }
+                Comment("power reserve ${w.powerReserveHours} h" + (w.complications.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""))
+            }
+        }
+        // lifecycle: repair ↔ owned, sold, wishlist → owned
+        LifecyclePanel(app, w, status = { status = it })
 
         // ---- add a wrist shot any time, not only while logging the wear ----
         TerminalPanel(title = "add wrist shot", titleColor = color) {
@@ -167,7 +194,13 @@ fun WatchDetailScreen(app: PersonalTerminalApp, nav: NavHostController, watchId:
                     KeyValue("current value", "$cur ${"%,.0f".format(v)}".trim() + (delta?.let { d -> "  (${if (d >= 0) "+" else ""}${"%,.0f".format(d)})" } ?: ""), valueColor = if ((delta ?: 0.0) >= 0) p.green else p.red)
                 }
                 w.purchasePrice?.let { paid -> if (logs.isNotEmpty()) KeyValue("cost per wear", "$cur ${"%,.2f".format(paid / logs.size)}".trim(), valueColor = p.cyan) }
-                w.purchaseDay?.let { d -> KeyValue("owned for", "${java.time.temporal.ChronoUnit.DAYS.between(LocalDate.ofEpochDay(d), today)} days") }
+                if (w.sold) {
+                    w.soldPrice?.let { sp ->
+                        val gain = w.purchasePrice?.let { sp - it }
+                        KeyValue("sold for", "$cur ${"%,.0f".format(sp)}".trim() + (gain?.let { g -> "  (${if (g >= 0) "+" else ""}${"%,.0f".format(g)} realised)" } ?: ""), valueColor = if ((gain ?: 0.0) >= 0) p.green else p.red)
+                    }
+                    w.purchaseDay?.let { d -> KeyValue("owned for", "${java.time.temporal.ChronoUnit.DAYS.between(LocalDate.ofEpochDay(d), LocalDate.ofEpochDay(w.statusDay))} days") }
+                } else w.purchaseDay?.let { d -> KeyValue("owned for", "${java.time.temporal.ChronoUnit.DAYS.between(LocalDate.ofEpochDay(d), today)} days") }
             }
         }
 
@@ -294,5 +327,74 @@ fun WatchDetailScreen(app: PersonalTerminalApp, nav: NavHostController, watchId:
         }
         TermButton("back", color = p.fgDim, onClick = { nav.popBackStack() })
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+/**
+ * Lifecycle controls: `send for service` / `back from service`, `mark sold` with a price, and for
+ * wishlist entries `save` + `bought it`. Sold and wishlist pieces keep their history; only the
+ * status changes, so every action is reversible from here.
+ */
+@Composable
+private fun LifecyclePanel(app: PersonalTerminalApp, w: Watch, status: (String) -> Unit) {
+    val p = Term.palette
+    val scope = rememberCoroutineScope()
+    var sellPrice by remember(w.id) { mutableStateOf("") }
+    var selling by remember(w.id) { mutableStateOf(false) }
+    var repairCost by remember(w.id) { mutableStateOf("") }
+    var saveAmount by remember(w.id) { mutableStateOf("") }
+    val cur = w.currency
+    fun touch() { app.habits.mutations.value = System.currentTimeMillis() }
+    when (w.status) {
+        Watch.STATUS_WISHLIST -> TerminalPanel(title = "wishlist", titleColor = p.yellow) {
+            val t = w.targetPrice
+            if (t != null && t > 0) {
+                val pct = (w.savedSoFar / t).toFloat().coerceIn(0f, 1f)
+                dev.personalterminal.ui.components.AsciiProgress(fraction = pct, width = 16, color = p.yellow, showPercent = true, label = "$cur ${"%,.0f".format(w.savedSoFar)} / ${"%,.0f".format(t)}".trim())
+                if (w.savedSoFar >= t) Comment("fully funded – go get it", color = p.green)
+            } else Comment("no target price yet · edit to set one")
+            if (w.link.isNotBlank()) KeyValue("link", w.link.removePrefix("https://").removePrefix("http://").take(40), valueColor = p.cyan)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                TermTextField(value = saveAmount, onValueChange = { saveAmount = it.filter { c -> c.isDigit() || c == '.' || c == '-' } }, placeholder = "amount", keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal, modifier = Modifier.weight(0.5f), prompt = "")
+                TermButton("save", color = p.yellow, enabled = saveAmount.toDoubleOrNull() != null, onClick = {
+                    scope.launch { app.watches.addSavings(w, saveAmount.toDouble()); saveAmount = ""; touch(); status("fund updated") }
+                })
+                TermButton("bought it", filled = true, color = p.green, onClick = {
+                    scope.launch { app.watches.acquire(w); touch(); status("${w.displayName} joined the collection") }
+                })
+            }
+            Comment("`save 200 ${w.displayName}` and `watch buy ${w.displayName}` work from the prompt too")
+        }
+        Watch.STATUS_SOLD -> TerminalPanel(title = "sold", titleColor = p.red) {
+            Comment("history, photos and service log are kept; the watch no longer counts in stats or rotation")
+            TermButton("undo – back in the collection", color = p.fgDim, onClick = { scope.launch { app.watches.markOwned(w); touch(); status("${w.displayName} → owned") } })
+        }
+        Watch.STATUS_REPAIR -> TerminalPanel(title = "in repair", titleColor = p.orange) {
+            Comment("away since ${LocalDate.ofEpochDay(w.statusDay).format(DateTimeFormatter.ofPattern("dd MMM yyyy"))} · ${java.time.temporal.ChronoUnit.DAYS.between(LocalDate.ofEpochDay(w.statusDay), AppClock.today())} days · left out of `watch next` and the challenges")
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                TermTextField(value = repairCost, onValueChange = { repairCost = it.filter { c -> c.isDigit() || c == '.' } }, placeholder = "invoice", keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal, modifier = Modifier.weight(0.5f), prompt = "")
+                TermButton("back from service", filled = true, color = p.orange, onClick = {
+                    scope.launch { app.watches.backFromRepair(w, cost = repairCost.toDoubleOrNull()); repairCost = ""; touch(); status("${w.displayName} is back") }
+                })
+            }
+        }
+        else -> TerminalPanel(title = "lifecycle", titleColor = p.fgDim) {
+            if (!selling) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TermButton("send for service", color = p.orange, modifier = Modifier.weight(1f), onClick = {
+                    scope.launch { app.watches.sendForRepair(w); touch(); status("${w.displayName} → in repair") }
+                })
+                TermButton("mark sold", color = p.red, modifier = Modifier.weight(1f), onClick = { selling = true })
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TermTextField(value = sellPrice, onValueChange = { sellPrice = it.filter { c -> c.isDigit() || c == '.' } }, placeholder = "sale price" + (cur.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: ""), keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal, modifier = Modifier.weight(0.6f), prompt = "")
+                    TermButton("confirm sold", filled = true, color = p.red, onClick = {
+                        scope.launch { app.watches.markSold(w, sellPrice.toDoubleOrNull()); selling = false; touch(); status("${w.displayName} marked sold") }
+                    })
+                    TermButton("x", color = p.fgDim, onClick = { selling = false })
+                }
+                w.purchasePrice?.let { paid -> sellPrice.toDoubleOrNull()?.let { sp -> Comment("realised ${if (sp - paid >= 0) "+" else ""}${"%,.0f".format(sp - paid)} against $cur ${"%,.0f".format(paid)} paid".trim(), color = if (sp >= paid) p.green else p.red) } }
+            }
+            Comment("`watch repair ${w.displayName}` · `watch sold ${w.displayName} 1500`")
+        }
     }
 }

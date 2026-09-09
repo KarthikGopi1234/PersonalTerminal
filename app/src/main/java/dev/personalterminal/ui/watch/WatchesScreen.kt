@@ -41,6 +41,9 @@ import coil.compose.AsyncImage
 import dev.personalterminal.PersonalTerminalApp
 import dev.personalterminal.data.db.Watch
 import dev.personalterminal.data.db.displayName
+import dev.personalterminal.data.repo.WatchRepository
+import dev.personalterminal.domain.Rotation
+import dev.personalterminal.domain.Uptime
 import dev.personalterminal.ui.components.AsciiProgress
 import dev.personalterminal.ui.components.BracketCheckbox
 import dev.personalterminal.ui.components.Comment
@@ -63,6 +66,14 @@ fun WatchesScreen(app: PersonalTerminalApp, nav: NavHostController) {
     val scope = rememberCoroutineScope()
     val countMap = counts.associate { it.watchId to it.count }
     val maxCount = (counts.maxOfOrNull { it.count } ?: 1).coerceAtLeast(1)
+    // lifecycle / uptime / rotation – recomputed on every data change
+    val mutations by app.habits.mutations.collectAsStateWithLifecycle()
+    var lifecycle by remember { mutableStateOf<WatchRepository.Lifecycle?>(null) }
+    var uptime by remember { mutableStateOf<List<Uptime.Status>>(emptyList()) }
+    var challenges by remember { mutableStateOf<List<Rotation.Challenge>>(emptyList()) }
+    LaunchedEffect(mutations, watches, counts, wornToday) {
+        lifecycle = app.watches.lifecycle(); uptime = app.watches.uptime(); challenges = app.watches.challenges(today)
+    }
 
     LazyColumn(
         Modifier.fillMaxSize().statusBarsPadding(),
@@ -96,6 +107,35 @@ fun WatchesScreen(app: PersonalTerminalApp, nav: NavHostController) {
                 TermButton("vault", onClick = { nav.navigate(Routes.WATCH_BOX) }, color = p.yellow, modifier = Modifier.weight(1f))
                 TermButton("stats", onClick = { nav.navigate(Routes.WATCH_STATS) }, color = p.green, modifier = Modifier.weight(1f))
                 TermButton("straps", onClick = { nav.navigate(Routes.STRAPS) }, color = p.purple, modifier = Modifier.weight(1f))
+            }
+        }
+        // in repair / uptime / wishlist one-liners
+        lifecycle?.let { lc ->
+            if (lc.inRepair.isNotEmpty()) item {
+                Comment("in repair: " + lc.inRepair.joinToString(", ") { "${it.displayName} (${today.toEpochDay() - it.statusDay}d)" }, color = p.orange)
+            }
+            lc.nextUp?.let { (w, pct) -> item {
+                Row(Modifier.fillMaxWidth().clickable { nav.navigate(Routes.WISHLIST) }, verticalAlignment = Alignment.CenterVertically) {
+                    Text("☆ next: ${w.displayName} · $pct% funded", color = p.yellow, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    Text("[ wishlist ${lc.wishlist.size} ]", color = p.fgDim, style = MaterialTheme.typography.labelSmall)
+                }
+            } }
+        }
+        Uptime.summary(uptime)?.let { line -> item {
+            Text("uptime: $line", color = if (line.startsWith("stopped")) p.red else p.yellow, style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.clickable { nav.navigate(Routes.WISHLIST + "?tab=uptime") })
+        } }
+        // rotation challenges – the small game for bigger collections
+        if (challenges.isNotEmpty()) item {
+            TerminalPanel(title = "rotation", titleColor = p.green, onClick = { nav.navigate(Routes.WISHLIST + "?tab=rotation") }) {
+                challenges.take(3).forEach { c ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        BracketCheckbox(checked = c.done, color = p.green); Spacer(Modifier.width(8.dp))
+                        Text(c.title, color = if (c.done) p.fgDim else p.fg, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        Text("${c.progress}/${c.target}", color = if (c.done) p.green else p.fgDim, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                if (challenges.size > 3) Comment("+${challenges.size - 3} more · tap for details")
             }
         }
         // `watch next` – the rotation suggester, inline: one tap logs it, the row opens the watch.
@@ -132,6 +172,7 @@ fun WatchesScreen(app: PersonalTerminalApp, nav: NavHostController) {
                     Text(w.displayName, color = p.fg, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (w.nickname.isNotBlank()) Text("${w.brand} ${w.model}", color = p.fgDim, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 2.dp)) {
+                        if (w.status == Watch.STATUS_REPAIR) Tag("in repair", p.orange)
                         if (w.reference.isNotBlank()) Tag(w.reference)
                         if (w.movement.isNotBlank()) Tag(w.movement, p.named(w.color))
                         w.caseSizeMm?.let { Tag("${it.toString().removeSuffix(".0")}mm") }
@@ -141,7 +182,14 @@ fun WatchesScreen(app: PersonalTerminalApp, nav: NavHostController) {
                 }
             }
         }
-        item { Spacer(Modifier.height(4.dp)); TermButton("timeline", onClick = { nav.navigate(Routes.TIMELINE) }, color = p.fgDim); Spacer(Modifier.height(24.dp)) }
+        item {
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TermButton("timeline", onClick = { nav.navigate(Routes.TIMELINE) }, color = p.fgDim, modifier = Modifier.weight(1f))
+                TermButton("wishlist · sold · uptime", onClick = { nav.navigate(Routes.WISHLIST) }, color = p.fgDim, modifier = Modifier.weight(1.6f))
+            }
+            Spacer(Modifier.height(24.dp))
+        }
     }
 }
 

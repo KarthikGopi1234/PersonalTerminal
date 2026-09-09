@@ -145,6 +145,8 @@ class ScreenshotSuite {
     @Test fun themeAmberCrt() = shoot("29-theme-amber-crt", Tab.WATCH, theme = "amber", crt = true) { nav -> WatchesScreen(app, nav) }
     @Test fun themeRosePineDawn() = shoot("30-theme-rose-pine-dawn", Tab.PROFILE, theme = "rosepine", dark = false) { nav -> ProfileScreen(app, nav) }
     @Test fun themeSynthwave() = shoot("31-theme-synthwave", Tab.TIMER, theme = "synthwave") { nav -> SessionsScreen(app, nav) }
+    @Test fun wishlist() = shoot("33-wishlist", Tab.WATCH) { nav -> dev.personalterminal.ui.watch.WishlistScreen(app, nav, "wishlist") }
+    @Test fun uptime() = shoot("34-uptime", Tab.WATCH, theme = "everforest") { nav -> dev.personalterminal.ui.watch.WishlistScreen(app, nav, "uptime") }
     @Test fun fontsAndIcons() = shoot("32-fonts-icons", Tab.PROFILE, theme = "onedark") { nav ->
         // settings scrolled to the font / icon pickers
         SettingsScreen(app, nav, scrollToAppearanceEnd = true)

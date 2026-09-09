@@ -16,6 +16,12 @@ timer stop|pause|resume   control the timer            stopwatch [habit]    coun
 tick <habit> <item|n>     tick / untick a checklist item (habit completes when all are ticked)
 wear <watch>              log today's watch            watch next           rotation suggestion
 watch vault               collection grid by neglect   watch stats          collection stats
+watch repair <watch>      send for service (status in repair, out of `watch next`) · watch back <watch> [invoice]
+watch sold <watch> [price] mark sold – history kept, realised gain booked · `watch back <watch>` undoes it
+wish [brand model [target]] wishlist: bare lists it, with words adds one · `wish rm <watch>`
+save <amount> <watch>     add to a wishlist fund (`save -50 …` withdraws) · watch buy <watch> [paid]  → owned
+uptime                    power-reserve status of the mechanical watches (stopped / low / running) + wind-and-set steps
+watch challenges          rotation challenges (every watch this month, no repeats this week, dust off, balanced quarter)
 shield <habit>            repair the latest gap        habit add [template] new habit / from template
 yesterday <habit>         late-log the previous scheduled day (repair window: before 12:00, no shield spent)
 pause <habit> [until yyyy-mm-dd | 2w | 10d | 1m]      hide a habit until a date (streak bridged)

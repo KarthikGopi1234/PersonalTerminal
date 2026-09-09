@@ -22,7 +22,7 @@ class Converters {
         Routine::class, Habit::class, HabitLog::class, ShieldUse::class, Watch::class, WearLog::class, XpEvent::class,
         FocusSession::class, WatchService::class, AccuracyReading::class, Strap::class, SkipRule::class, SleepLog::class, StrapSwap::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -67,10 +67,24 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun get(context: Context): AppDatabase = INSTANCE ?: synchronized(this) {
             INSTANCE ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
                 .also { INSTANCE = it }
+        }
+
+        /** 0.3.5 → 0.3.6: watch lifecycle (status / sale), wishlist fields, power reserve + complications. Additive only. */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE watches ADD COLUMN status TEXT NOT NULL DEFAULT 'owned'")
+                db.execSQL("ALTER TABLE watches ADD COLUMN statusDay INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE watches ADD COLUMN soldPrice REAL")
+                db.execSQL("ALTER TABLE watches ADD COLUMN targetPrice REAL")
+                db.execSQL("ALTER TABLE watches ADD COLUMN savedSoFar REAL NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE watches ADD COLUMN link TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE watches ADD COLUMN powerReserveHours INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE watches ADD COLUMN complications TEXT NOT NULL DEFAULT ''")
+            }
         }
 
         /** 0.3.4 → 0.3.5: minimum version + ramping targets, habit stacking anchors, life areas. Additive only. */

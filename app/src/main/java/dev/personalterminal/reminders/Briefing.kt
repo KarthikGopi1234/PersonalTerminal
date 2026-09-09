@@ -34,12 +34,16 @@ object Briefing {
 
     suspend fun build(app: PersonalTerminalApp, summary: DaySummary, today: LocalDate): Text? {
         val due = summary.active
-        if (due.isEmpty() && app.watches.allWatches().none { !it.archived }) return null
+        if (due.isEmpty() && app.watches.ownedWatches().isEmpty()) return null
         val streaks = due.filter { !it.completed }.mapNotNull { hs -> app.habits.streakFor(hs.habit.id, today)?.takeIf { it.current >= 3 }?.let { hs.habit.name to it.current } }
             .sortedByDescending { it.second }.take(3)
         val lastChance = due.filter { it.habit.schedule == ScheduleType.WEEKLY && !it.completed }
             .filter { Schedule.weekOutlook(it.habit, it.weekCount, today).lastChance }.map { it.habit.name }
-        val suggestion = runCatching { app.watches.suggestNext(today) }.getOrNull()?.let { (w, why) -> w.displayName + (why.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "") }
+        val suggestion = runCatching { app.watches.suggestNext(today) }.getOrNull()?.let { (w, why) ->
+            // `uptime`: warn when the suggested watch has run down so the briefing doubles as the wind-and-set cue
+            val up = runCatching { app.watches.uptime().firstOrNull { it.watch.id == w.id } }.getOrNull()
+            w.displayName + (why.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "") + (if (up?.state == dev.personalterminal.domain.Uptime.State.STOPPED) " · stopped – wind & set" else "")
+        }
         val late = summary.all.mapNotNull { hs -> hs.streak.lateLogDay?.let { hs.habit.name } }
         return compose(
             Inputs(

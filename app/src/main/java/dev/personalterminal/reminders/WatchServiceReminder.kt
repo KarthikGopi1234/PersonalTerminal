@@ -45,7 +45,7 @@ object WatchServiceReminder {
         val today = AppClock.today()
         val nm = NotificationManagerCompat.from(context)
         val prefs = context.getSharedPreferences("service_reminders", Context.MODE_PRIVATE)
-        app.watches.allWatches().filter { !it.archived }.forEach { w ->
+        app.watches.ownedWatches().forEach { w ->
             val due = app.watches.nextServiceDue(w) ?: return@forEach
             val days = java.time.temporal.ChronoUnit.DAYS.between(today, due)
             if (days > 30) return@forEach

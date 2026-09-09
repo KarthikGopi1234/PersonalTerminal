@@ -264,9 +264,39 @@ data class Watch(
     val lugWidthMm: Int? = null,
     /** Recommended service interval in months (0 = unknown / not tracked). */
     @ColumnInfo(defaultValue = "0") val serviceIntervalMonths: Int = 0,
-)
+    // ---- lifecycle (0.3.6): owned → in repair → sold, or a wishlist entry that becomes owned
+    /** One of [STATUS_OWNED], [STATUS_REPAIR], [STATUS_SOLD], [STATUS_WISHLIST]. */
+    @ColumnInfo(defaultValue = "'owned'") val status: String = STATUS_OWNED,
+    /** Epoch day the current status began (drop-off day, sale day, day added to the wishlist); 0 = unknown. */
+    @ColumnInfo(defaultValue = "0") val statusDay: Long = 0,
+    /** Sale price (same currency as [purchasePrice]); only meaningful when sold. */
+    val soldPrice: Double? = null,
+    // ---- wishlist
+    val targetPrice: Double? = null,
+    @ColumnInfo(defaultValue = "0") val savedSoFar: Double = 0.0,
+    @ColumnInfo(defaultValue = "''") val link: String = "",
+    // ---- uptime: mechanical power reserve + calendar complications
+    /** Power reserve in hours (0 = unknown / not a mechanical watch). */
+    @ColumnInfo(defaultValue = "0") val powerReserveHours: Int = 0,
+    /** Comma-separated tokens from [dev.personalterminal.domain.Uptime.COMPLICATIONS] (`date,moonphase`). */
+    @ColumnInfo(defaultValue = "''") val complications: String = "",
+) {
+    companion object {
+        const val STATUS_OWNED = "owned"
+        const val STATUS_REPAIR = "repair"
+        const val STATUS_SOLD = "sold"
+        const val STATUS_WISHLIST = "wishlist"
+    }
+}
 
 val Watch.displayName: String get() = nickname.ifBlank { "$brand $model".trim() }
+
+/** In the collection right now (owned or away for service) – what `ls watches`, stats and reminders count. */
+val Watch.owned: Boolean get() = !archived && (status == Watch.STATUS_OWNED || status == Watch.STATUS_REPAIR)
+val Watch.inRepair: Boolean get() = !archived && status == Watch.STATUS_REPAIR
+val Watch.sold: Boolean get() = !archived && status == Watch.STATUS_SOLD
+val Watch.wished: Boolean get() = !archived && status == Watch.STATUS_WISHLIST
+val Watch.complicationSet: Set<String> get() = complications.split(',').map { it.trim().lowercase() }.filter { it.isNotBlank() }.toSet()
 
 /** Which watch was worn on which day (plus optional wrist-shot). */
 @Serializable

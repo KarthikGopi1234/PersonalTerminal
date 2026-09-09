@@ -9,7 +9,7 @@ object Routes {
     const val TIMER = "timer?habitId={habitId}"
     const val TIMELINE = "timeline"
     const val WATCHES = "watches"
-    const val WATCH_EDIT = "watch/edit?id={id}"
+    const val WATCH_EDIT = "watch/edit?id={id}&wish={wish}"
     const val WATCH_DETAIL = "watch/{id}"
     const val WEAR_LOG = "wear/log?day={day}"
     const val PROFILE = "profile"
@@ -22,6 +22,8 @@ object Routes {
     const val STRAPS = "straps"
     const val WATCH_STATS = "watch/stats"
     const val WATCH_BOX = "watch/box"
+    const val WISHLIST = "watch/wishlist"
+    const val WISHLIST_TAB = "watch/wishlist?tab={tab}"
     const val YEAR_REVIEW = "review/year"
     const val SKIP_RULES = "habit/insurance"
     const val IMPORT = "import"
@@ -31,7 +33,7 @@ object Routes {
         "habit/edit?id=$id&routineId=${routineId ?: -1}" + (name?.let { "&name=${android.net.Uri.encode(it)}" } ?: "")
     fun habitDetail(id: Long) = "habit/$id"
     fun timer(habitId: Long = 0) = "timer?habitId=$habitId"
-    fun watchEdit(id: Long = 0) = "watch/edit?id=$id"
+    fun watchEdit(id: Long = 0, wish: Boolean = false) = "watch/edit?id=$id&wish=${if (wish) 1 else 0}"
     fun watchDetail(id: Long) = "watch/$id"
     fun wearLog(day: Long) = "wear/log?day=$day"
 }

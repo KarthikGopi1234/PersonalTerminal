@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,6 +37,9 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import dev.personalterminal.PersonalTerminalApp
 import dev.personalterminal.data.db.Watch
+import dev.personalterminal.data.db.complicationSet
+import dev.personalterminal.domain.AppClock
+import dev.personalterminal.domain.Uptime
 import dev.personalterminal.ui.components.Comment
 import dev.personalterminal.ui.components.PromptLine
 import dev.personalterminal.ui.components.TermButton
@@ -48,7 +52,7 @@ import kotlinx.coroutines.launch
 private val movements = listOf("automatic", "manual", "quartz", "solar", "spring drive", "smart")
 
 @Composable
-fun WatchEditScreen(app: PersonalTerminalApp, nav: NavHostController, watchId: Long) {
+fun WatchEditScreen(app: PersonalTerminalApp, nav: NavHostController, watchId: Long, startOnWishlist: Boolean = false) {
     val p = Term.palette
     val scope = rememberCoroutineScope()
     var original by remember { mutableStateOf<Watch?>(null) }
@@ -67,6 +71,11 @@ fun WatchEditScreen(app: PersonalTerminalApp, nav: NavHostController, watchId: L
     var currentValue by remember { mutableStateOf("") }
     var currency by remember { mutableStateOf("") }
     var serviceInterval by remember { mutableStateOf("") }
+    var powerReserve by remember { mutableStateOf("") }
+    var complications by remember { mutableStateOf(setOf<String>()) }
+    var wishlist by remember { mutableStateOf(startOnWishlist) }
+    var targetPrice by remember { mutableStateOf("") }
+    var link by remember { mutableStateOf("") }
     val photo = rememberPhotoPickerState(initialPath = null, prefix = "watch")
     var confirmDelete by remember { mutableStateOf(false) }
 
@@ -77,6 +86,8 @@ fun WatchEditScreen(app: PersonalTerminalApp, nav: NavHostController, watchId: L
             lugWidth = w.lugWidthMm?.toString() ?: ""; purchasePrice = w.purchasePrice?.let { "%.0f".format(it) } ?: ""
             purchaseDate = w.purchaseDay?.let { java.time.LocalDate.ofEpochDay(it).toString() } ?: ""; currentValue = w.currentValue?.let { "%.0f".format(it) } ?: ""
             currency = w.currency; serviceInterval = if (w.serviceIntervalMonths > 0) w.serviceIntervalMonths.toString() else ""
+            powerReserve = if (w.powerReserveHours > 0) w.powerReserveHours.toString() else ""; complications = w.complicationSet
+            wishlist = w.status == Watch.STATUS_WISHLIST; targetPrice = w.targetPrice?.let { "%.0f".format(it) } ?: ""; link = w.link
             if (photo.photoPath == null) photo.photoPath = w.photoPath
         }
         loaded = true
@@ -88,8 +99,14 @@ fun WatchEditScreen(app: PersonalTerminalApp, nav: NavHostController, watchId: L
         Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        PromptLine(if (watchId == 0L) "watch add" else "watch edit")
+        PromptLine(if (watchId == 0L) (if (wishlist) "wish add" else "watch add") else "watch edit")
         if (!loaded) { Comment("loading…"); return@Column }
+        if (watchId == 0L || original?.status == Watch.STATUS_WISHLIST) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(if (!wishlist) "(•) in the collection" else "( ) in the collection", color = if (!wishlist) p.cyan else p.fgDim, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.clickable { wishlist = false })
+                Text(if (wishlist) "(•) ☆ wishlist" else "( ) ☆ wishlist", color = if (wishlist) p.yellow else p.fgDim, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.clickable { wishlist = true })
+            }
+        }
 
         // Profile photo: camera, recent photos or any image file
         PhotoPickerRow(app, photo, placeholder = "⌚", placeholderColor = p.named(color))
@@ -112,6 +129,20 @@ fun WatchEditScreen(app: PersonalTerminalApp, nav: NavHostController, watchId: L
                 movements.drop(3).forEach { m -> MoveChip(m, movement == m) { movement = if (movement == m) "" else m } }
             }
         }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Bottom) {
+            TermTextField(value = powerReserve, onValueChange = { powerReserve = it.filter { c -> c.isDigit() }.take(4) }, label = "power reserve (h)", placeholder = if (movement == "manual" || movement == "automatic") "42" else "–", keyboardType = KeyboardType.Number, modifier = Modifier.weight(1f))
+            Column(Modifier.weight(1.4f)) {
+                Text("complications:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
+                Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Uptime.COMPLICATIONS.forEach { c ->
+                        val on = c in complications
+                        Text(if (on) "[$c]" else " $c ", color = if (on) p.cyan else p.fgDim, style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.clickable { complications = if (on) complications - c else complications + c }.padding(vertical = 4.dp))
+                    }
+                }
+            }
+        }
+        Comment("`uptime` tells you which watches have stopped and what to set before wearing them")
         Column {
             Text("accent:", color = p.fgDim, style = MaterialTheme.typography.labelMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
@@ -126,7 +157,15 @@ fun WatchEditScreen(app: PersonalTerminalApp, nav: NavHostController, watchId: L
             TermTextField(value = lugWidth, onValueChange = { lugWidth = it.filter { c -> c.isDigit() }.take(2) }, label = "lug mm", placeholder = "20", keyboardType = KeyboardType.Number, modifier = Modifier.weight(1f))
             TermTextField(value = serviceInterval, onValueChange = { serviceInterval = it.filter { c -> c.isDigit() }.take(3) }, label = "service every (months)", placeholder = "60", keyboardType = KeyboardType.Number, modifier = Modifier.weight(1f))
         }
-        TerminalPanel(title = "purchase & valuation", titleColor = p.yellow) {
+        if (wishlist) TerminalPanel(title = "wishlist", titleColor = p.yellow) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                TermTextField(value = targetPrice, onValueChange = { targetPrice = it.filter { c -> c.isDigit() || c == '.' } }, label = "target price", placeholder = "4500", keyboardType = KeyboardType.Decimal, modifier = Modifier.weight(1.3f))
+                TermTextField(value = currency, onValueChange = { currency = it.uppercase().take(3) }, label = "cur", placeholder = "AUD", modifier = Modifier.weight(0.7f))
+            }
+            TermTextField(value = link, onValueChange = { link = it.trim() }, label = "link", placeholder = "https://…", keyboardType = KeyboardType.Uri)
+            Comment("`save 200 <watch>` grows the fund · `watch buy <watch>` moves it into the collection")
+        }
+        else TerminalPanel(title = "purchase & valuation", titleColor = p.yellow) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 TermTextField(value = purchaseDate, onValueChange = { purchaseDate = it.filter { c -> c.isDigit() || c == '-' }.take(10) }, label = "bought (yyyy-mm-dd)", placeholder = "2021-06-15", keyboardType = KeyboardType.Number, modifier = Modifier.weight(1.3f))
                 TermTextField(value = currency, onValueChange = { currency = it.uppercase().take(3) }, label = "cur", placeholder = "AUD", modifier = Modifier.weight(0.7f))
@@ -140,7 +179,7 @@ fun WatchEditScreen(app: PersonalTerminalApp, nav: NavHostController, watchId: L
         TermTextField(value = notes, onValueChange = { notes = it }, label = "notes", placeholder = "service history, strap, story…", singleLine = false, imeAction = ImeAction.Default)
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TermButton(if (watchId == 0L) "add to collection" else "save", filled = true, color = p.cyan, modifier = Modifier.weight(1f), enabled = brand.isNotBlank() || model.isNotBlank() || nickname.isNotBlank(), onClick = {
+            TermButton(if (watchId == 0L) (if (wishlist) "add to wishlist" else "add to collection") else "save", filled = true, color = p.cyan, modifier = Modifier.weight(1f), enabled = brand.isNotBlank() || model.isNotBlank() || nickname.isNotBlank(), onClick = {
                 scope.launch {
                     val w = (original ?: Watch(brand = "", model = "")).copy(
                         brand = brand.trim(), model = model.trim(), nickname = nickname.trim(), reference = reference.trim(), movement = movement,
@@ -148,8 +187,17 @@ fun WatchEditScreen(app: PersonalTerminalApp, nav: NavHostController, watchId: L
                         lugWidthMm = lugWidth.toIntOrNull(), purchasePrice = purchasePrice.toDoubleOrNull(), currentValue = currentValue.toDoubleOrNull(),
                         purchaseDay = runCatching { java.time.LocalDate.parse(purchaseDate).toEpochDay() }.getOrNull(), currency = currency.trim(),
                         serviceIntervalMonths = serviceInterval.toIntOrNull() ?: 0,
+                        powerReserveHours = powerReserve.toIntOrNull() ?: 0, complications = Uptime.COMPLICATIONS.filter { it in complications }.joinToString(","),
+                        targetPrice = targetPrice.toDoubleOrNull(), link = link,
+                        status = when {
+                            wishlist -> Watch.STATUS_WISHLIST
+                            original?.status == Watch.STATUS_WISHLIST -> Watch.STATUS_OWNED // toggled off the wishlist = acquired
+                            else -> original?.status ?: Watch.STATUS_OWNED
+                        },
+                        statusDay = if (original == null || wishlist != (original?.status == Watch.STATUS_WISHLIST)) AppClock.today().toEpochDay() else original!!.statusDay,
                     )
                     app.watches.saveWatch(w)
+                    app.habits.mutations.value = System.currentTimeMillis()
                     nav.popBackStack()
                 }
             })

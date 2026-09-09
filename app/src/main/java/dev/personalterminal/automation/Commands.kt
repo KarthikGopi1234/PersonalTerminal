@@ -15,6 +15,10 @@ import dev.personalterminal.data.db.checklistItems
 import dev.personalterminal.data.db.hasItem
 import dev.personalterminal.data.db.Watch
 import dev.personalterminal.data.db.displayName
+import dev.personalterminal.data.db.owned
+import dev.personalterminal.data.db.inRepair
+import dev.personalterminal.data.db.sold
+import dev.personalterminal.data.db.wished
 import dev.personalterminal.domain.Templates
 import dev.personalterminal.timer.PomodoroService
 import dev.personalterminal.ui.navigation.Routes
@@ -300,12 +304,99 @@ object Commands {
                     else -> watch(app, target)?.let { w -> app.watches.fitStrap(strap, w.id, date, comment); ok("${strap.name} → ${w.displayName} · swap logged") } ?: err("no watch matches '$target'")
                 }
             }
-            "watch" -> when (rest.trim().lowercase()) {
-                "next", "suggest" -> ok(app.watches.suggestNext()?.let { "watch next → ${it.first.displayName}: ${it.second}" } ?: "add a watch first", Routes.WATCHES)
-                "vault", "box", "grid" -> ok("watch vault", Routes.WATCH_BOX)
-                "stats" -> ok("watch stats", Routes.WATCH_STATS)
-                "", "ls" -> ok("open watches", Routes.WATCHES)
-                else -> watch(app, rest)?.let { ok("open ${it.displayName}", Routes.watchDetail(it.id)) } ?: err("no watch matches '$rest'")
+            "watch" -> {
+                val (sub, arg) = split(rest.trim())
+                when (sub.lowercase()) {
+                    "next", "suggest" -> ok(app.watches.suggestNext()?.let { "watch next → ${it.first.displayName}: ${it.second}" } ?: "add a watch first", Routes.WATCHES)
+                    "vault", "box", "grid" -> ok("watch vault", Routes.WATCH_BOX)
+                    "stats" -> ok("watch stats", Routes.WATCH_STATS)
+                    "", "ls" -> ok("open watches", Routes.WATCHES)
+                    "challenges", "challenge", "rotation" -> {
+                        val list = app.watches.challenges(date)
+                        if (list.isEmpty()) err("rotation challenges need at least two watches") else ok("rotation challenges\n" + list.joinToString("\n") { it.line + "\n    # " + it.detail }, Routes.WATCHES)
+                    }
+                    "sold", "sell" -> {
+                        // watch sold <watch> [price]
+                        val parts = arg.trim().split(Regex("\\s+"))
+                        val price = parts.lastOrNull()?.toDoubleOrNull()
+                        val ref = if (price != null) parts.dropLast(1).joinToString(" ") else arg
+                        watch(app, ref)?.let { w ->
+                            if (w.sold) return err("${w.displayName} is already marked sold")
+                            app.watches.markSold(w, price, date); app.habits.mutations.value = System.currentTimeMillis()
+                            val gain = if (price != null && w.purchasePrice != null) price - w.purchasePrice else null
+                            ok("${w.displayName} → sold" + (price?.let { " for ${w.currency} ${"%,.0f".format(it)}".trimEnd() } ?: "") + (gain?.let { g -> " · ${if (g >= 0) "+" else ""}${"%,.0f".format(g)} realised" } ?: "") + " · history kept", Routes.watchDetail(w.id))
+                        } ?: err("no watch matches '$ref'")
+                    }
+                    "repair", "service", "away" -> watch(app, arg)?.let { w ->
+                        if (w.inRepair) err("${w.displayName} is already at the watchmaker since ${LocalDate.ofEpochDay(w.statusDay)}")
+                        else { app.watches.sendForRepair(w, date, comment); app.habits.mutations.value = System.currentTimeMillis(); ok("${w.displayName} → in repair · `watch back ${w.displayName}` when it returns", Routes.watchDetail(w.id)) }
+                    } ?: err("no watch matches '$arg'")
+                    "back", "returned", "own", "keep" -> {
+                        // watch back <watch> [cost]
+                        val parts = arg.trim().split(Regex("\\s+"))
+                        val cost = parts.lastOrNull()?.toDoubleOrNull()
+                        val ref = if (cost != null) parts.dropLast(1).joinToString(" ") else arg
+                        watch(app, ref)?.let { w ->
+                            when {
+                                w.inRepair -> { app.watches.backFromRepair(w, date, cost, comment); app.habits.mutations.value = System.currentTimeMillis(); ok("${w.displayName} is back on the roster" + (cost?.let { " · ${w.currency} ${"%,.0f".format(it)} logged".trimEnd() } ?: ""), Routes.watchDetail(w.id)) }
+                                w.sold || w.wished -> { app.watches.markOwned(w, date, cost); app.habits.mutations.value = System.currentTimeMillis(); ok("${w.displayName} → owned", Routes.watchDetail(w.id)) }
+                                else -> err("${w.displayName} is already in the collection")
+                            }
+                        } ?: err("no watch matches '$ref'")
+                    }
+                    "buy", "bought", "acquire" -> {
+                        // watch buy <wishlist watch> [paid]
+                        val parts = arg.trim().split(Regex("\\s+"))
+                        val paid = parts.lastOrNull()?.toDoubleOrNull()
+                        val ref = if (paid != null) parts.dropLast(1).joinToString(" ") else arg
+                        watch(app, ref)?.let { w ->
+                            if (!w.wished) err("${w.displayName} is not on the wishlist") else { app.watches.acquire(w, paid, date); app.habits.mutations.value = System.currentTimeMillis(); ok("⌚ ${w.displayName} → owned · congratulations", Routes.watchDetail(w.id)) }
+                        } ?: err("no wishlist watch matches '$ref'")
+                    }
+                    "uptime" -> uptime(app)
+                    else -> watch(app, rest)?.let { ok("open ${it.displayName}", Routes.watchDetail(it.id)) } ?: err("no watch matches '$rest'")
+                }
+            }
+            "uptime" -> uptime(app)
+            "wish", "wishlist" -> {
+                // wish → list · wish <brand model> [target] → add · wish rm <ref>
+                val (sub, arg) = split(rest.trim())
+                when {
+                    rest.isBlank() || rest == "ls" -> {
+                        val l = app.watches.lifecycle()
+                        if (l.wishlist.isEmpty()) ok("wishlist empty · `wish Tudor BB58 4500` adds one", Routes.WISHLIST)
+                        else ok("wishlist\n" + l.wishlist.joinToString("\n") { w ->
+                            val t = w.targetPrice
+                            "  ${w.displayName.take(18).padEnd(18)} " + (if (t != null && t > 0) "${"%,.0f".format(w.savedSoFar)}/${"%,.0f".format(t)} · ${((w.savedSoFar / t) * 100).toInt().coerceIn(0, 100)}% funded" else "no target")
+                        }, Routes.WISHLIST)
+                    }
+                    sub == "rm" || sub == "remove" -> watch(app, arg, anyStatus = true)?.let { w ->
+                        if (!w.wished) err("${w.displayName} is not on the wishlist") else { app.watches.deleteWatch(w); ok("${w.displayName} removed from the wishlist") }
+                    } ?: err("no wishlist watch matches '$arg'")
+                    else -> {
+                        val parts = rest.trim().split(Regex("\\s+"))
+                        val target = parts.lastOrNull()?.toDoubleOrNull()
+                        val words = if (target != null) parts.dropLast(1) else parts
+                        if (words.isEmpty()) return err("usage: wish <brand> <model> [target price]")
+                        val brand = words.first(); val model = words.drop(1).joinToString(" ")
+                        val cur = app.watches.allWatches().firstNotNullOfOrNull { it.currency.takeIf { c -> c.isNotBlank() } } ?: ""
+                        val id = app.watches.saveWatch(Watch(brand = brand, model = model, status = Watch.STATUS_WISHLIST, statusDay = date.toEpochDay(), targetPrice = target, currency = cur, notes = comment))
+                        app.habits.mutations.value = System.currentTimeMillis()
+                        ok("☆ $brand $model on the wishlist" + (target?.let { " · target ${"%,.0f".format(it)}" } ?: "") + " · `save 200 ${model.ifBlank { brand }}` builds the fund", Routes.watchDetail(id))
+                    }
+                }
+            }
+            "save", "fund" -> {
+                // save 200 <wishlist watch> · save -50 <watch>
+                val parts = rest.trim().split(Regex("\\s+"), limit = 2)
+                val amount = parts.firstOrNull()?.toDoubleOrNull() ?: return err("usage: save <amount> <wishlist watch>")
+                val w = watch(app, parts.getOrNull(1) ?: "", anyStatus = true)?.takeIf { it.wished }
+                    ?: app.watches.lifecycle().wishlist.singleOrNull()
+                    ?: return err("which wishlist watch? · `wish` lists them")
+                app.watches.addSavings(w, amount); app.habits.mutations.value = System.currentTimeMillis()
+                val fresh = app.watches.watch(w.id) ?: w
+                val t = fresh.targetPrice
+                ok("${fresh.displayName}: ${"%,.0f".format(fresh.savedSoFar)}" + (if (t != null && t > 0) " / ${"%,.0f".format(t)} · ${((fresh.savedSoFar / t) * 100).toInt().coerceIn(0, 100)}% funded" + (if (fresh.savedSoFar >= t) " · `watch buy ${fresh.displayName}` when it lands" else "") else " saved"), Routes.WISHLIST)
             }
             "tick", "item" -> {
                 // tick <habit> <item name | number>  – toggles one step of a checklist habit
@@ -439,6 +530,15 @@ object Commands {
     private fun xpHint() = " (+10 xp)"
     private fun noHabit(ref: String) = err(if (ref.isBlank()) "which habit?" else "no habit matches '$ref'")
 
+    /** `uptime` – power-reserve status of the mechanical watches, stopped first, with wind-and-set steps. */
+    private suspend fun uptime(app: PersonalTerminalApp): Result {
+        val list = app.watches.uptime()
+        if (list.isEmpty()) return err("no mechanical watches – set a power reserve in `watch edit`")
+        val now = AppClock.now()
+        val up = java.time.Duration.between(LocalDate.ofEpochDay(app.watches.allWear().minOfOrNull { it.day } ?: now.toLocalDate().toEpochDay()).atStartOfDay(), now).toDays()
+        return ok("${"%02d:%02d".format(now.hour, now.minute)} up $up days, ${list.size} watch${if (list.size == 1) "" else "es"}\n" + dev.personalterminal.domain.Uptime.render(list), Routes.WATCHES)
+    }
+
     private suspend fun status(app: PersonalTerminalApp, id: Long, date: LocalDate) =
         app.habits.daySummary(date).all.firstOrNull { it.habit.id == id }
 
@@ -458,14 +558,19 @@ object Commands {
         return if (initials.size == 1) initials.first() else prefix.firstOrNull() ?: contains.firstOrNull()
     }
 
-    suspend fun watch(app: PersonalTerminalApp, ref: String): Watch? {
+    /** Resolves a watch reference; the collection (owned / in repair) wins, then sold and wishlist pieces. */
+    suspend fun watch(app: PersonalTerminalApp, ref: String, anyStatus: Boolean = false): Watch? {
         val r = ref.trim().trim('"', '\'')
         if (r.isBlank()) return null
         val all = app.watches.allWatches().filter { !it.archived }
-        r.toLongOrNull()?.let { id -> all.firstOrNull { it.id == id }?.let { return it } }
-        all.firstOrNull { it.nickname.equals(r, true) || it.displayName.equals(r, true) || it.model.equals(r, true) }?.let { return it }
-        val m = all.filter { it.nickname.contains(r, true) || it.displayName.contains(r, true) || it.reference.contains(r, true) }
-        return if (m.size == 1) m.first() else m.firstOrNull()
+        val pools = if (anyStatus) listOf(all) else listOf(all.filter { it.owned }, all.filter { !it.owned })
+        for (pool in pools) {
+            r.toLongOrNull()?.let { id -> pool.firstOrNull { it.id == id }?.let { return it } }
+            pool.firstOrNull { it.nickname.equals(r, true) || it.displayName.equals(r, true) || it.model.equals(r, true) }?.let { return it }
+            val m = pool.filter { it.nickname.contains(r, true) || it.displayName.contains(r, true) || it.reference.contains(r, true) }
+            if (m.isNotEmpty()) return m.first()
+        }
+        return null
     }
 
     private suspend fun numberThenHabit(app: PersonalTerminalApp, rest: String, default: Int?): Pair<Int, Habit>? {
@@ -497,6 +602,9 @@ object Commands {
         |timer [min] [habit]   stopwatch [habit]
         |timer stop|pause      wear <watch>
         |watch next · vault    shield <habit>
+        |watch sold|repair|back <w>   uptime
+        |wish <brand model> 4500 · save 200 <w>
+        |watch buy <w> · watch challenges
         |yesterday <habit>     (late log, till 12:00)
         |pause <habit> 2w      resume <habit>
         |sleep 23:30 · wake 06:45 · slept 23:30 06:45

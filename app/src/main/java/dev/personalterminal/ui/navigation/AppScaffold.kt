@@ -125,6 +125,9 @@ fun AppScaffold(app: PersonalTerminalApp, settings: Settings, startRoute: String
                 composable(Routes.STRAPS) { StrapsScreen(app, nav) }
                 composable(Routes.WATCH_STATS) { WatchStatsScreen(app, nav) }
                 composable(Routes.WATCH_BOX) { dev.personalterminal.ui.watch.WatchBoxScreen(app, nav) }
+                composable(Routes.WISHLIST_TAB, arguments = listOf(navArgument("tab") { type = NavType.StringType; defaultValue = "wishlist" })) {
+                    dev.personalterminal.ui.watch.WishlistScreen(app, nav, it.arguments?.getString("tab") ?: "wishlist")
+                }
                 composable(Routes.SKIP_RULES) { dev.personalterminal.ui.habits.SkipRulesScreen(app, nav) }
                 composable(Routes.YEAR_REVIEW) { dev.personalterminal.ui.insights.YearReviewScreen(app, nav) }
                 composable(Routes.IMPORT) { ImportScreen(app, nav) }
@@ -138,8 +141,8 @@ fun AppScaffold(app: PersonalTerminalApp, settings: Settings, startRoute: String
                 }
                 composable(Routes.TIMELINE) { TimelineScreen(app, nav) }
                 composable(Routes.WATCHES) { WatchesScreen(app, nav) }
-                composable(Routes.WATCH_EDIT, arguments = listOf(navArgument("id") { type = NavType.LongType; defaultValue = 0L })) {
-                    WatchEditScreen(app, nav, it.arguments?.getLong("id") ?: 0L)
+                composable(Routes.WATCH_EDIT, arguments = listOf(navArgument("id") { type = NavType.LongType; defaultValue = 0L }, navArgument("wish") { type = NavType.IntType; defaultValue = 0 })) {
+                    WatchEditScreen(app, nav, it.arguments?.getLong("id") ?: 0L, startOnWishlist = (it.arguments?.getInt("wish") ?: 0) == 1)
                 }
                 composable(Routes.WATCH_DETAIL, arguments = listOf(navArgument("id") { type = NavType.LongType })) {
                     WatchDetailScreen(app, nav, it.arguments?.getLong("id") ?: 0L)

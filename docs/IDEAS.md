@@ -49,11 +49,11 @@ app. Generic mechanics only; nothing that copies another app's names, copy or br
 
 | # | Idea | Why it earns its place | Effort |
 |---|------|------------------------|--------|
-| B7 | **Watch lifecycle** – status owned / in repair / sold (sale price + date → realised gain), in-repair banner tied to the service drop-off, collection value over time as a sparkline. | Collections change; archived-or-not loses the money story | M |
-| B8 | **Wishlist** – brand, model, target price, link, notes, photo, "saved so far"; converts to an owned watch carrying the price. Profile line: `next: BB58 · 62% funded`. | Every collector app has one; ours can tie the fund to XP milestones | M |
-| B9 | **`uptime` for mechanical watches** – power-reserve hours per watch + last worn → "running / stopped ~2 d ago", a "set date" nudge after 30-day months and February for non-perpetual calendars, a wind-and-set checklist before wearing, moon-phase age for moonphase dials. | Genuinely useful and nobody does it as a first-class feature; the pun writes itself | S/M |
+| B7 ✅ | **Watch lifecycle** (shipped 0.3.6) – status owned / in repair / sold (sale price + date → realised gain), in-repair banner tied to the service drop-off, collection value over time as a sparkline. | Collections change; archived-or-not loses the money story | M |
+| B8 ✅ | **Wishlist** (shipped 0.3.6) – brand, model, target price, link, notes, photo, "saved so far"; converts to an owned watch carrying the price. Profile line: `next: BB58 · 62% funded`. | Every collector app has one; ours can tie the fund to XP milestones | M |
+| B9 ✅ | **`uptime` for mechanical watches** (shipped 0.3.6) – power-reserve hours per watch + last worn → "running / stopped ~2 d ago", a "set date" nudge after 30-day months and February for non-perpetual calendars, a wind-and-set checklist before wearing, moon-phase age for moonphase dials. | Genuinely useful and nobody does it as a first-class feature; the pun writes itself | S/M |
 | B10 | **Collection report + documents** – multiple photos per watch (dial, caseback, papers), receipt / warranty attachments, and an insurance-style PDF: photo, reference, serial, purchase, value, service history, totals. | The one export that matters when something goes wrong | M |
-| B11 | **Rotation challenges** – "wear every watch once this month 3/4", "no repeats this week"; folds into B3. | Turns `watch next` into a game for bigger collections | S |
+| B11 ✅ | **Rotation challenges** (shipped 0.3.6) – "wear every watch once this month 3/4", "no repeats this week"; folds into B3. | Turns `watch next` into a game for bigger collections | S |
 
 ### Focus & terminal feel
 
@@ -66,7 +66,7 @@ app. Generic mechanics only; nothing that copies another app's names, copy or br
 | B16 | **`sshd` – terminal over LAN** – the app serves a token-protected text UI on Wi-Fi (`http://phone:7331`) with the same command shell (`done`, `wear`, `stats`) and a read-only heatmap; a keyboard on a laptop drives the phone. | The honest answer to "web app + sync" for a one-person, one-phone setup | L |
 | B17 | **App blocking during focus** – usage-stats + overlay that bounces chosen apps while a session runs. | Real focus protection – but hard to verify headlessly and fragile across OEMs | L |
 
-Suggested bundles: **0.3.5** ✅ = B1 + B2 + B4 + B5 + B6 (habit loop, shipped) · **0.3.6** = B7 + B8 + B9 + B11 (watches) ·
+Suggested bundles: **0.3.5** ✅ = B1 + B2 + B4 + B5 + B6 (habit loop, shipped) · **0.3.6** ✅ = B7 + B8 + B9 + B11 (watches, shipped) ·
 **0.3.7** = B12 + B13 + B14 + B15 (focus & feel) · **0.4.0** = B3 + B10, then B16 on its own.
 
 ## Polish audit (0.3.2)

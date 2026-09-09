@@ -12,6 +12,9 @@ import dev.personalterminal.data.db.AccuracyReading
 import dev.personalterminal.data.db.Strap
 import dev.personalterminal.data.db.StrapSwap
 import dev.personalterminal.data.db.displayName
+import dev.personalterminal.data.db.owned
+import dev.personalterminal.domain.Rotation
+import dev.personalterminal.domain.Uptime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -29,8 +32,11 @@ class WatchRepository(private val context: Context, private val db: AppDatabase)
 
     val photoDir: File get() = File(context.filesDir, PHOTO_DIR).apply { mkdirs() }
 
+    /** The collection: owned or away for service. Sold and wishlist pieces are excluded. */
     fun observeWatches(): Flow<List<Watch>> = watchDao.observeActive()
     fun observeAllWatches(): Flow<List<Watch>> = watchDao.observeAll()
+    fun observeWishlist(): Flow<List<Watch>> = watchDao.observeByStatus(Watch.STATUS_WISHLIST)
+    fun observeSold(): Flow<List<Watch>> = watchDao.observeByStatus(Watch.STATUS_SOLD)
     fun observeWatch(id: Long): Flow<Watch?> = watchDao.observeById(id)
     fun observeWearCounts(): Flow<List<WatchCount>> = watchDao.observeWearCounts()
     fun observeWearForDay(date: LocalDate): Flow<List<WearLogWithWatch>> = wearDao.observeForDay(date.toEpochDay())
@@ -41,7 +47,77 @@ class WatchRepository(private val context: Context, private val db: AppDatabase)
 
     suspend fun watch(id: Long): Watch? = watchDao.getById(id)
     suspend fun allWatches(): List<Watch> = watchDao.getAll()
+    /** Non-archived watches currently in the collection (owned / in repair). */
+    suspend fun ownedWatches(): List<Watch> = watchDao.getAll().filter { it.owned }
     suspend fun allWear(): List<WearLog> = wearDao.getAll()
+
+    // ------------------------------------------------------------------ lifecycle (0.3.6)
+
+    /** Send a watch away for service: status → repair from [date]; a `service` log entry is created when [logService]. */
+    suspend fun sendForRepair(watch: Watch, date: LocalDate = AppClock.today(), note: String = "", logService: Boolean = true) {
+        watchDao.update(watch.copy(status = Watch.STATUS_REPAIR, statusDay = date.toEpochDay()))
+        if (logService) serviceDao.insert(WatchService(watchId = watch.id, day = date.toEpochDay(), kind = "service", notes = note.ifBlank { "dropped off" },
+            nextDueDay = if (watch.serviceIntervalMonths > 0) date.plusMonths(watch.serviceIntervalMonths.toLong()).toEpochDay() else null))
+    }
+
+    /** Back from service: status → owned. Optionally records the invoice on the drop-off entry. */
+    suspend fun backFromRepair(watch: Watch, date: LocalDate = AppClock.today(), cost: Double? = null, note: String = "") {
+        watchDao.update(watch.copy(status = Watch.STATUS_OWNED, statusDay = date.toEpochDay()))
+        if (cost != null || note.isNotBlank()) {
+            val open = serviceDao.getAll().filter { it.watchId == watch.id && it.kind == "service" }.maxByOrNull { it.day }
+            if (open != null && open.day >= watch.statusDay) serviceDao.update(open.copy(cost = cost ?: open.cost, notes = listOf(open.notes, note).filter { it.isNotBlank() }.joinToString(" · ")))
+            else serviceDao.insert(WatchService(watchId = watch.id, day = date.toEpochDay(), kind = "service", cost = cost, notes = note))
+        }
+    }
+
+    /** Sold: keeps the history (wear log, photos, service) but leaves the collection; realised gain = price − paid. */
+    suspend fun markSold(watch: Watch, price: Double?, date: LocalDate = AppClock.today()) {
+        watchDao.update(watch.copy(status = Watch.STATUS_SOLD, statusDay = date.toEpochDay(), soldPrice = price))
+        strapDao.getAll().filter { it.watchId == watch.id }.forEach { fitStrap(it, null, date, "watch sold") }
+    }
+
+    /** Un-sell / un-wish: the watch is back in the collection as owned from [date]. */
+    suspend fun markOwned(watch: Watch, date: LocalDate = AppClock.today(), paid: Double? = watch.purchasePrice) {
+        watchDao.update(watch.copy(status = Watch.STATUS_OWNED, statusDay = date.toEpochDay(), soldPrice = null,
+            purchasePrice = paid ?: watch.purchasePrice, purchaseDay = watch.purchaseDay ?: date.toEpochDay()))
+    }
+
+    /** Wishlist entry → owned watch: the target price becomes the price paid unless [paid] is given. */
+    suspend fun acquire(watch: Watch, paid: Double? = null, date: LocalDate = AppClock.today()) =
+        markOwned(watch.copy(purchaseDay = date.toEpochDay(), targetPrice = watch.targetPrice), date, paid ?: watch.targetPrice)
+
+    /** `save 200 bb58` – add to the fund of a wishlist watch (negative amounts withdraw; clamps at 0). */
+    suspend fun addSavings(watch: Watch, amount: Double) =
+        watchDao.update(watch.copy(savedSoFar = (watch.savedSoFar + amount).coerceAtLeast(0.0)))
+
+    data class Lifecycle(val inRepair: List<Watch>, val wishlist: List<Watch>, val sold: List<Watch>) {
+        val realisedGain: Double get() = sold.sumOf { (it.soldPrice ?: 0.0) - (it.purchasePrice ?: 0.0) }
+        /** `next: BB58 · 62% funded` – the most-funded wishlist entry with a target. */
+        val nextUp: Pair<Watch, Int>? get() = wishlist.filter { (it.targetPrice ?: 0.0) > 0 }
+            .map { it to ((it.savedSoFar / it.targetPrice!!) * 100).toInt().coerceIn(0, 100) }.maxByOrNull { it.second }
+    }
+
+    suspend fun lifecycle(): Lifecycle {
+        val all = watchDao.getAll().filter { !it.archived }
+        return Lifecycle(
+            inRepair = all.filter { it.status == Watch.STATUS_REPAIR },
+            wishlist = all.filter { it.status == Watch.STATUS_WISHLIST }.sortedByDescending { it.savedSoFar / (it.targetPrice ?: Double.MAX_VALUE) },
+            sold = all.filter { it.status == Watch.STATUS_SOLD }.sortedByDescending { it.statusDay },
+        )
+    }
+
+    // ------------------------------------------------------------------ uptime + rotation
+
+    /** Power-reserve status of every eligible watch (mechanical with a reserve, or a moon phase). */
+    suspend fun uptime(now: java.time.LocalDateTime = AppClock.now()): List<Uptime.Status> {
+        val watches = Uptime.eligible(watchDao.getAll())
+        if (watches.isEmpty()) return emptyList()
+        val lastWorn = wearDao.getAll().groupBy { it.watchId }.mapValues { (_, l) -> LocalDate.ofEpochDay(l.maxOf { it.day }) }
+        return watches.map { Uptime.status(it, lastWorn[it.id], now) }
+    }
+
+    suspend fun challenges(today: LocalDate = AppClock.today()): List<Rotation.Challenge> =
+        Rotation.challenges(watchDao.getAll(), wearDao.getAll(), today)
 
     suspend fun saveWatch(watch: Watch): Long =
         if (watch.id == 0L) watchDao.insert(watch) else { watchDao.update(watch); watch.id }
@@ -133,9 +209,11 @@ class WatchRepository(private val context: Context, private val db: AppDatabase)
         }
 
     suspend fun collectionStats(today: LocalDate = AppClock.today()): CollectionStats =
-        collectionStats(watchDao.getAll().filter { !it.archived }, wearDao.getAll(), today)
+        collectionStats(watchDao.getAll().filter { it.owned }, wearDao.getAll(), today)
 
-    private fun collectionStats(watches: List<Watch>, logs: List<WearLog>, today: LocalDate): CollectionStats {
+    private fun collectionStats(watches: List<Watch>, allLogs: List<WearLog>, today: LocalDate): CollectionStats {
+        val ids = watches.map { it.id }.toSet()
+        val logs = allLogs.filter { it.watchId in ids }
         val total = logs.map { it.day }.distinct().size
         val perWatch = watches.map { w ->
             val mine = logs.filter { it.watchId == w.id }
@@ -163,7 +241,7 @@ class WatchRepository(private val context: Context, private val db: AppDatabase)
      * Returns the pick plus a one-line reason.
      */
     suspend fun suggestNext(today: LocalDate = AppClock.today()): Pair<Watch, String>? {
-        val stats = collectionStats(today).perWatch
+        val stats = collectionStats(today).perWatch.filter { it.watch.status != Watch.STATUS_REPAIR }
         if (stats.isEmpty()) return null
         val maxWear = stats.maxOf { it.wearDays }.coerceAtLeast(1)
         val scored = stats.map { s ->
@@ -307,14 +385,22 @@ class WatchRepository(private val context: Context, private val db: AppDatabase)
     /** One row per watch with collection stats, purchase and valuation data. */
     suspend fun collectionCsv(today: LocalDate = AppClock.today()): String {
         val stats = collectionStats(today)
-        val sb = StringBuilder("brand,model,nickname,reference,movement,case_mm,lug_mm,purchase_date,purchase_price,current_value,currency,wear_days,share,last_worn,cost_per_wear,service_interval_months\n")
+        val sb = StringBuilder("brand,model,nickname,reference,movement,case_mm,lug_mm,purchase_date,purchase_price,current_value,currency,wear_days,share,last_worn,cost_per_wear,service_interval_months,status,sold_price,power_reserve_h,complications\n")
         stats.perWatch.forEach { s ->
             val w = s.watch
             sb.append(listOf(
                 w.brand, w.model, w.nickname, w.reference, w.movement, w.caseSizeMm?.toString() ?: "", w.lugWidthMm?.toString() ?: "",
                 w.purchaseDay?.let { LocalDate.ofEpochDay(it).toString() } ?: "", w.purchasePrice?.toString() ?: "", w.currentValue?.toString() ?: "",
                 w.currency, s.wearDays.toString(), "%.3f".format(s.share), s.lastWorn?.toString() ?: "", s.costPerWear?.let { "%.2f".format(it) } ?: "",
-                w.serviceIntervalMonths.toString(),
+                w.serviceIntervalMonths.toString(), w.status, "", w.powerReserveHours.toString(), w.complications,
+            ).joinToString(",") { csv(it) }).append('\n')
+        }
+        // sold pieces keep their row (history + realised gain) below the collection
+        watchDao.getAll().filter { !it.archived && it.status == Watch.STATUS_SOLD }.forEach { w ->
+            sb.append(listOf(
+                w.brand, w.model, w.nickname, w.reference, w.movement, w.caseSizeMm?.toString() ?: "", w.lugWidthMm?.toString() ?: "",
+                w.purchaseDay?.let { LocalDate.ofEpochDay(it).toString() } ?: "", w.purchasePrice?.toString() ?: "", w.currentValue?.toString() ?: "",
+                w.currency, "", "", "", "", w.serviceIntervalMonths.toString(), w.status, w.soldPrice?.toString() ?: "", w.powerReserveHours.toString(), w.complications,
             ).joinToString(",") { csv(it) }).append('\n')
         }
         return sb.toString()

@@ -173,8 +173,12 @@ interface RoutineDao {
 
 @Dao
 interface WatchDao {
-    @Query("SELECT * FROM watches WHERE archived = 0 ORDER BY brand, model")
+    /** The collection proper: not archived, owned or away for service (sold and wishlist pieces live elsewhere). */
+    @Query("SELECT * FROM watches WHERE archived = 0 AND status IN ('owned', 'repair') ORDER BY brand, model")
     fun observeActive(): Flow<List<Watch>>
+
+    @Query("SELECT * FROM watches WHERE archived = 0 AND status = :status ORDER BY statusDay DESC, brand, model")
+    fun observeByStatus(status: String): Flow<List<Watch>>
 
     @Query("SELECT * FROM watches ORDER BY brand, model")
     fun observeAll(): Flow<List<Watch>>

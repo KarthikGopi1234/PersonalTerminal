@@ -119,13 +119,19 @@ object DemoData {
         // Watches + wear log.
         val watches = app.watches
         val speedy = watches.saveWatch(Watch(brand = "Omega", model = "Speedmaster Professional", nickname = "speedy", reference = "310.30.42.50.01.001", movement = "cal. 3861", caseSizeMm = 42f, color = "orange", photoPath = photo(app, "omega", 0xFF2B2B2B.toInt(), 0xFFE0E0E0.toInt()),
-            purchasePrice = 9800.0, currentValue = 10400.0, currency = "AUD", purchaseDay = today.minusYears(2).toEpochDay(), lugWidthMm = 20, serviceIntervalMonths = 60))
+            purchasePrice = 9800.0, currentValue = 10400.0, currency = "AUD", purchaseDay = today.minusYears(2).toEpochDay(), lugWidthMm = 20, serviceIntervalMonths = 60, powerReserveHours = 50, complications = "chrono"))
         val seiko = watches.saveWatch(Watch(brand = "Seiko", model = "SPB143", nickname = "62MAS", movement = "6R35", caseSizeMm = 40.5f, color = "cyan", photoPath = photo(app, "seiko", 0xFF1F3A4A.toInt(), 0xFF8BE9FD.toInt()),
-            purchasePrice = 1650.0, currentValue = 1500.0, currency = "AUD", purchaseDay = today.minusDays(500).toEpochDay(), lugWidthMm = 20, serviceIntervalMonths = 72))
+            purchasePrice = 1650.0, currentValue = 1500.0, currency = "AUD", purchaseDay = today.minusDays(500).toEpochDay(), lugWidthMm = 20, serviceIntervalMonths = 72, powerReserveHours = 70, complications = "date"))
         val cartier = watches.saveWatch(Watch(brand = "Cartier", model = "Tank Must", movement = "quartz", caseSizeMm = 33.7f, color = "yellow", photoPath = photo(app, "cartier", 0xFF3B3320.toInt(), 0xFFF1FA8C.toInt()),
             purchasePrice = 4200.0, currency = "AUD", purchaseDay = today.minusDays(300).toEpochDay(), lugWidthMm = 20))
         val gshock = watches.saveWatch(Watch(brand = "Casio", model = "GW-M5610", nickname = "square", movement = "tough solar", caseSizeMm = 43.2f, color = "green", photoPath = photo(app, "casio", 0xFF202020.toInt(), 0xFF50FA7B.toInt()),
             purchasePrice = 210.0, currency = "AUD", purchaseDay = today.minusDays(900).toEpochDay()))
+        // Lifecycle: a funded wishlist entry, one on the list without a target, and a watch sold last spring.
+        watches.saveWatch(Watch(brand = "Tudor", model = "Black Bay 58", nickname = "BB58", reference = "M79030N", caseSizeMm = 39f, color = "blue", status = Watch.STATUS_WISHLIST, statusDay = today.minusDays(120).toEpochDay(),
+            targetPrice = 5200.0, savedSoFar = 3250.0, currency = "AUD", link = "https://www.tudorwatch.com/black-bay-58", powerReserveHours = 70, complications = ""))
+        watches.saveWatch(Watch(brand = "Grand Seiko", model = "SBGA211 Snowflake", caseSizeMm = 41f, color = "purple", status = Watch.STATUS_WISHLIST, statusDay = today.minusDays(30).toEpochDay(), currency = "AUD", complications = "date"))
+        watches.saveWatch(Watch(brand = "Hamilton", model = "Khaki Field Mechanical", nickname = "khaki", caseSizeMm = 38f, color = "green", movement = "H-50", status = Watch.STATUS_SOLD, statusDay = today.minusDays(160).toEpochDay(),
+            purchasePrice = 780.0, soldPrice = 650.0, currency = "AUD", purchaseDay = today.minusDays(1100).toEpochDay(), powerReserveHours = 80))
         // Straps, service log and accuracy readings for the watch tracker screens.
         val suede = watches.saveStrap(dev.personalterminal.data.db.Strap(name = "brown suede", material = "leather", color = "brown", widthMm = 20))
         val nato = watches.saveStrap(dev.personalterminal.data.db.Strap(name = "bond nato", material = "nato", color = "grey/black", widthMm = 20))
